@@ -12,7 +12,7 @@ gantt
 
     section Phase 1: Core Engine
     Structure & FUSE       :done,    p1, 2025-12-01, 2026-01-05
-    Garbage Collection     :active,  p2, 2026-01-06, 2026-01-08
+    Garbage Collection     :done,    p2, 2026-01-06, 2026-01-08
 
     section Phase 2: Chronos
     Snapshot Logic         :         p3, 2026-01-09, 2026-01-14
