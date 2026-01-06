@@ -11,23 +11,23 @@ gantt
     axisFormat  %b %d
 
     section Phase 1: Core Engine
-    Structure & FUSE       :done,    p1, 2025-12-01, 2026-01-05
-    Garbage Collection     :done,    p2, 2026-01-06, 2026-01-08
+    Structure & FUSE       :done,    p1, 2025-12-01, 2025-12-25
+    Garbage Collection     :done,    p2, 2025-12-26, 2026-01-02
 
     section Phase 2: Chronos
-    Snapshot Logic         :         p3, 2026-01-09, 2026-01-14
-    Time Travel Mounting   :         p4, 2026-01-15, 2026-01-18
+    Snapshot Logic         :active,  p3, 2026-01-03, 2026-01-23
+    Time Travel Mounting   :         p4, 2026-01-24, 2026-02-05
 
     section Phase 3: TagFS
-    Tag Metadata System    :         p5, 2026-01-19, 2026-01-22
-    Virtual Directories    :         p6, 2026-01-23, 2026-01-28
+    Tag Metadata System    :         p5, 2026-02-06, 2026-02-18
+    Virtual Directories    :         p6, 2026-02-19, 2026-02-28
 
     section Phase 4: ZipFS
-    Archive Integration    :         p7, 2026-01-29, 2026-02-04
+    Archive Integration    :         p7, 2026-03-01, 2026-03-14
 
     section Phase 5: Release
-    Benchmarks & TUI       :         p8, 2026-02-05, 2026-02-12
-    Documentation          :         p9, 2026-02-13, 2026-02-15
+    Benchmarks & TUI       :         p8, 2026-03-15, 2026-03-24
+    Documentation          :         p9, 2026-03-25, 2026-03-31
 ```
 
 ## Overview
