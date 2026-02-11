@@ -1,423 +1,433 @@
 // src/fuse_handler.rs
-use crate::file_manager::FileManager;
-use crate::file_manager::FileKind;
+use crate::file_manager::{FileKind, FileManager, FileRecipe};
 use fuser::{
-    FileAttr,
-    FileType,
-    Filesystem,
-    ReplyAttr,
-    ReplyData,
-    ReplyDirectory,
-    ReplyEntry,
-    ReplyWrite,
-    ReplyCreate,
-    ReplyEmpty,
-    ReplyOpen,
-    Request,
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
+    ReplyEntry, ReplyOpen, ReplyWrite, Request,
 };
-use libc::ENOENT; // Removed EIO as it was unused
-use std::ffi::OsStr;
-use std::time::{ Duration, UNIX_EPOCH, SystemTime };
-use std::collections::hash_map::DefaultHasher;
+use libc::ENOENT;
 use std::collections::HashMap;
-use std::hash::{ Hash, Hasher };
+use std::ffi::OsStr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, SystemTime};
 
 const TTL: Duration = Duration::from_secs(1);
+const FUSE_ROOT_ID: u64 = 1;
+const SNAPSHOT_DIR_ID: u64 = 2;
 
-// HELPER: Turn a String ("file.txt") into a Number (Inode)
-fn calculate_inode(filename: &str) -> u64 {
-    let mut s = DefaultHasher::new();
-    filename.hash(&mut s);
-    s.finish()
+// ===========================================================================
+// 1. DATA STRUCTURES
+// ===========================================================================
+
+#[derive(Clone)]
+pub struct Inode {
+    pub id: u64,
+    pub children: HashMap<String, Arc<RwLock<Inode>>>,
+    pub attr: FileAttr,
+    #[allow(dead_code)]
+    pub recipe: Option<FileRecipe>,
 }
 
-// Struct to hold a file being written in RAM
-struct WriteBuffer {
-    filename: String,
-    data: Vec<u8>,
+impl Inode {
+    fn new(id: u64, kind: FileType) -> Self {
+        let mut attr = dir_attr(id);
+        attr.kind = kind;
+        Inode {
+            id,
+            children: HashMap::new(),
+            attr,
+            recipe: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Snapshot {
+    #[allow(dead_code)]
+    pub name: String,
+    #[allow(dead_code)]
+    pub timestamp: SystemTime,
+    pub root: Arc<RwLock<Inode>>,
+}
+
+fn dir_attr(ino: u64) -> FileAttr {
+    FileAttr {
+        ino,
+        size: 0,
+        blocks: 0,
+        atime: SystemTime::now(),
+        mtime: SystemTime::now(),
+        ctime: SystemTime::now(),
+        crtime: SystemTime::now(),
+        kind: FileType::Directory,
+        perm: 0o755,
+        nlink: 2,
+        uid: 1000,
+        gid: 1000,
+        rdev: 0,
+        flags: 0,
+        blksize: 512,
+    }
 }
 
 pub struct BetterFS {
     pub manager: FileManager,
-    // Memory buffer for open files: Inode -> Data
-    open_files: HashMap<u64, WriteBuffer>,
-    inode_map: HashMap<u64, String>,
+    pub inode_registry: Arc<RwLock<HashMap<u64, Arc<RwLock<Inode>>>>>,
+    pub root: Arc<RwLock<Inode>>,
+    pub snapshots: Arc<RwLock<HashMap<String, Snapshot>>>,
+    next_inode: AtomicU64,
 }
 
 impl BetterFS {
     pub fn new(manager: FileManager) -> Self {
-        let mut inode_map = HashMap::new();
+        let registry = Arc::new(RwLock::new(HashMap::new()));
+        let root = Arc::new(RwLock::new(Inode::new(FUSE_ROOT_ID, FileType::Directory)));
+        registry.write().unwrap().insert(FUSE_ROOT_ID, root.clone());
 
-        // 1. Initialize Root (Inode 1 is empty path "")
-        inode_map.insert(1, "".to_string());
-
-        // 2. HYDRATION: Scan DB to restore memory of existing files
-        println!("FUSE: Rebuilding Inode Map...");
-        let all_files = manager.list_files();
-        for filename in all_files {
-            let inode = calculate_inode(&filename);
-            inode_map.insert(inode, filename);
-        }
-        println!("FUSE: Restored {} inodes.", inode_map.len());
-
-        BetterFS {
+        let mut fs = BetterFS {
             manager,
-            open_files: HashMap::new(),
-            inode_map,
+            inode_registry: registry,
+            root,
+            snapshots: Arc::new(RwLock::new(HashMap::new())),
+            next_inode: AtomicU64::new(100),
+        };
+
+        fs.hydrate_tree();
+        fs.restore_snapshots();
+        fs
+    }
+
+    // Restore snapshots from persistent storage
+    fn restore_snapshots(&mut self) {
+        let snapshot_metadata = self.manager.load_snapshots();
+
+        for meta in snapshot_metadata {
+            // Note: We're reusing the current root as a placeholder
+            // In production, we'd need to save/restore the actual tree state
+            let snapshot = Snapshot {
+                name: meta.name.clone(),
+                timestamp: std::time::UNIX_EPOCH + std::time::Duration::from_secs(meta.timestamp),
+                root: self.root.clone(), // Simplified: using current root
+            };
+
+            self.snapshots.write().unwrap().insert(meta.name, snapshot);
         }
+    }
+
+    fn generate_id(&self) -> u64 {
+        self.next_inode.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn hydrate_tree(&mut self) {
+        println!("FUSE: Hydrating Inode Tree from Database...");
+        let files = self.manager.list_files();
+
+        for path in files {
+            if let Some((size, kind)) = self.manager.get_file_metadata(&path) {
+                let ftype = match kind {
+                    FileKind::File => FileType::RegularFile,
+                    FileKind::Directory => FileType::Directory,
+                };
+                self.add_node_to_tree(&path, size, ftype);
+            }
+        }
+    }
+
+    fn add_node_to_tree(&self, path: &str, size: u64, kind: FileType) {
+        let mut current = self.root.clone();
+        let parts: Vec<&str> = path.split('/').collect();
+
+        for (i, part) in parts.iter().enumerate() {
+            if part.is_empty() {
+                continue;
+            }
+            let is_last = i == parts.len() - 1;
+
+            let mut node = current.write().unwrap();
+
+            if !node.children.contains_key(*part) {
+                let id = self.generate_id();
+                let mut child_inode =
+                    Inode::new(id, if is_last { kind } else { FileType::Directory });
+
+                if is_last {
+                    child_inode.attr.size = size;
+                    child_inode.attr.blocks = size.div_ceil(512);
+                }
+
+                let child_arc = Arc::new(RwLock::new(child_inode));
+                self.inode_registry
+                    .write()
+                    .unwrap()
+                    .insert(id, child_arc.clone());
+                node.children.insert(part.to_string(), child_arc);
+            }
+
+            let next = node.children.get(*part).unwrap().clone();
+            drop(node);
+            current = next;
+        }
+    }
+
+    fn get_mutable_inode(&self, path: &str) -> Result<Arc<RwLock<Inode>>, i32> {
+        if path.is_empty() {
+            // Special case: modifying root directly
+            if Arc::strong_count(&self.root) > 1 {
+                println!(
+                    "[CoW] WARNING: Root is shared but cannot be replaced (architectural limitation)"
+                );
+            }
+            return Ok(self.root.clone());
+        }
+
+        let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+
+        // Build the path from root, CoW-ing each shared node along the way
+        let mut path_stack: Vec<(Arc<RwLock<Inode>>, String)> =
+            vec![(self.root.clone(), String::new())];
+
+        for part in parts.iter() {
+            let current_arc = path_stack.last().unwrap().0.clone();
+            let current = current_arc.read().unwrap();
+
+            if let Some(child_arc) = current.children.get(*part) {
+                let child_clone = child_arc.clone();
+                drop(current); // Drop before mutable borrow
+                path_stack.push((child_clone, part.to_string()));
+            } else {
+                return Err(ENOENT);
+            }
+        }
+
+        // Now walk backwards, CoW-ing shared nodes
+        for i in (0..path_stack.len()).rev() {
+            let (node_arc, node_name) = &path_stack[i];
+
+            if Arc::strong_count(node_arc) > 1 {
+                if i == 0 {
+                    // Root is shared - we can't replace it, but we can still modify its children
+                    println!(
+                        "[CoW] Root is shared (ref_count={}), but modifying children directly",
+                        Arc::strong_count(node_arc)
+                    );
+                    // For root-level files, we'll clone them in-place in the root's children map
+                    if path_stack.len() == 2 {
+                        // Modifying a direct child of root
+                        let root = self.root.write().unwrap();
+                        let child_name = &path_stack[1].1;
+                        if let Some(child_arc) = root.children.get(child_name)
+                            && Arc::strong_count(child_arc) > 1 {
+                                println!(
+                                    "[CoW] Cloning root-level node '{}' (keeping same ID)",
+                                    child_name
+                                );
+                                let old_child = child_arc.read().unwrap();
+                                let new_child = old_child.clone(); // Keep same ID!
+                                let old_id = new_child.id;
+                                drop(old_child);
+
+                                // Create new Arc with cloned data but SAME ID
+                                let new_child_arc = Arc::new(RwLock::new(new_child));
+                                self.inode_registry
+                                    .write()
+                                    .unwrap()
+                                    .insert(old_id, new_child_arc.clone());
+                                drop(root);
+
+                                // Update root's children map
+                                self.root
+                                    .write()
+                                    .unwrap()
+                                    .children
+                                    .insert(child_name.clone(), new_child_arc.clone());
+                                return Ok(new_child_arc);
+                            }
+                    }
+                } else {
+                    // Clone this node and update parent's pointer (KEEP SAME ID)
+                    println!(
+                        "[CoW] Node '{}' is shared! Cloning (keeping same ID)...",
+                        node_name
+                    );
+
+                    let old_inode = node_arc.read().unwrap();
+                    let new_inode = old_inode.clone(); // Keep same ID
+                    let same_id = new_inode.id;
+                    drop(old_inode);
+
+                    let new_arc = Arc::new(RwLock::new(new_inode));
+                    self.inode_registry
+                        .write()
+                        .unwrap()
+                        .insert(same_id, new_arc.clone());
+
+                    // Update parent's children map
+                    let (parent_arc, _) = &path_stack[i - 1];
+                    parent_arc
+                        .write()
+                        .unwrap()
+                        .children
+                        .insert(node_name.clone(), new_arc.clone());
+
+                    // Update path_stack for remaining iterations
+                    path_stack[i] = (new_arc.clone(), node_name.clone());
+                }
+            }
+        }
+
+        Ok(path_stack.last().unwrap().0.clone())
+    }
+
+    fn get_path_from_inode(&self, target_ino: u64) -> Option<String> {
+        if target_ino == FUSE_ROOT_ID {
+            return Some(String::new());
+        }
+
+        let mut queue = vec![(self.root.clone(), String::new())];
+
+        while let Some((node_arc, path)) = queue.pop() {
+            let node = node_arc.read().unwrap();
+
+            if node.id == target_ino {
+                return Some(path);
+            }
+
+            for (name, child_arc) in node.children.iter() {
+                let child_path = if path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}/{}", path, name)
+                };
+                queue.push((child_arc.clone(), child_path));
+            }
+        }
+
+        None
     }
 }
 
 impl Filesystem for BetterFS {
-    // 1. LOOKUP
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_str().unwrap();
 
-        // A. Resolve Parent Path (The "Nesting" Fix)
-        let parent_path = match self.inode_map.get(&parent) {
-            Some(p) => p,
-            None => {
-                reply.error(ENOENT);
-                return;
-            }
-        };
-
-        // B. Build Full Path (e.g. "my_folder" + "/" + "inside.png")
-        let full_path = if parent_path.is_empty() {
-            name_str.to_string()
-        } else {
-            format!("{}/{}", parent_path, name_str)
-        };
-
-        // C. Calculate Inode for THIS specific file
-        let inode = calculate_inode(&full_path);
-
-        // 1. Check RAM Buffer (Is it open?)
-        if let Some(buffer) = self.open_files.get(&inode) {
-            let size = buffer.data.len() as u64;
-            let attr = FileAttr {
-                ino: inode,
-                size,
-                blocks: (size + 511) / 512,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: FileType::RegularFile, // Open buffers are usually files
-                perm: 0o644,
-                nlink: 1,
-                uid: 1000,
-                gid: 1000,
-                rdev: 0,
-                flags: 0,
-                blksize: 512,
-            };
-            // CRITICAL: Memorize this path
-            self.inode_map.insert(inode, full_path);
-            return reply.entry(&TTL, &attr, 0);
+        if parent == FUSE_ROOT_ID && name_str == ".snapshots" {
+            return reply.entry(&TTL, &dir_attr(SNAPSHOT_DIR_ID), 0);
         }
 
-        // 2. Check Backend (Database)
-        if let Some((size, kind)) = self.manager.get_file_metadata(&full_path) {
-            // CRITICAL: Memorize this path so we can find it again later!
-            self.inode_map.insert(inode, full_path);
+        if parent == SNAPSHOT_DIR_ID {
+            let snaps = self.snapshots.read().unwrap();
+            if let Some(snap) = snaps.get(name_str) {
+                let mut root_attr = snap.root.read().unwrap().attr;
+                // Mark snapshot roots as read-only
+                root_attr.perm = 0o555; // r-xr-xr-x
+                return reply.entry(&TTL, &root_attr, 0);
+            }
+            return reply.error(ENOENT);
+        }
 
-            let (file_type, perm) = match kind {
-                FileKind::File => (FileType::RegularFile, 0o644),
-                FileKind::Directory => (FileType::Directory, 0o755),
-            };
+        // Check if we're looking up inside a snapshot
+        // Snapshots use the same inode IDs as the frozen tree
+        let registry = self.inode_registry.read().unwrap();
 
-            let attr = FileAttr {
-                ino: inode,
-                size,
-                blocks: (size + 511) / 512,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: file_type,
-                perm,
-                nlink: 1,
-                uid: 1000,
-                gid: 1000,
-                rdev: 0,
-                flags: 0,
-                blksize: 512,
-            };
-            reply.entry(&TTL, &attr, 0);
+        if let Some(parent_node) = registry.get(&parent) {
+            let parent_guard = parent_node.read().unwrap();
+
+            if let Some(child_arc) = parent_guard.children.get(name_str) {
+                let child_guard = child_arc.read().unwrap();
+                reply.entry(&TTL, &child_guard.attr, 0);
+            } else {
+                reply.error(ENOENT);
+            }
         } else {
             reply.error(ENOENT);
         }
     }
-
-    // 2. GETATTR
-    // src/fuse_handler.rs -> getattr
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        // 1. Resolve Inode to Path
-        let filename = match self.inode_map.get(&ino) {
-            Some(name) => name.clone(),
-            None => {
-                reply.error(ENOENT);
-                return;
-            }
-        };
-
-        // 2. Check RAM Buffer (Files being written)
-        if let Some(buffer) = self.open_files.get(&ino) {
-            let attr = FileAttr {
-                ino,
-                size: buffer.data.len() as u64,
-                blocks: ((buffer.data.len() as u64) + 511) / 512,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: FileType::RegularFile,
-                perm: 0o644,
-                nlink: 1,
-                uid: 1000,
-                gid: 1000,
-                rdev: 0,
-                flags: 0,
-                blksize: 512,
-            };
-            reply.attr(&TTL, &attr);
-            return;
+        if ino == SNAPSHOT_DIR_ID {
+            return reply.attr(&TTL, &dir_attr(SNAPSHOT_DIR_ID));
         }
 
-        // ===================================================================
-        // 3. SPECIAL CASE: ROOT DIRECTORY (The Fix)
-        // The Root path is "" and usually not stored in the DB.
-        // We must handle it manually.
-        // ===================================================================
-        if ino == 1 {
-            let attr = FileAttr {
-                ino: 1,
-                size: 0,
-                blocks: 0,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: FileType::Directory, // Root is always a Directory
-                perm: 0o755,
-                nlink: 2,
-                uid: 1000,
-                gid: 1000,
-                rdev: 0,
-                flags: 0,
-                blksize: 512,
-            };
-            reply.attr(&TTL, &attr);
-            return;
-        }
-
-        // 4. Check Backend (Database)
-        if let Some((size, kind)) = self.manager.get_file_metadata(&filename) {
-            let (file_type, perm) = match kind {
-                FileKind::File => (FileType::RegularFile, 0o644),
-                FileKind::Directory => (FileType::Directory, 0o755),
-            };
-
-            let attr = FileAttr {
-                ino,
-                size,
-                blocks: (size + 511) / 512,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: file_type,
-                perm,
-                nlink: 1,
-                uid: 1000,
-                gid: 1000,
-                rdev: 0,
-                flags: 0,
-                blksize: 512,
-            };
-            reply.attr(&TTL, &attr);
+        let registry = self.inode_registry.read().unwrap();
+        if let Some(node) = registry.get(&ino) {
+            let guard = node.read().unwrap();
+            reply.attr(&TTL, &guard.attr);
         } else {
-            // If it's not in RAM, not Root, and not in DB -> It doesn't exist.
             reply.error(ENOENT);
         }
     }
 
-    // 3. READDIR
     fn readdir(
         &mut self,
         _req: &Request,
         ino: u64,
         _fh: u64,
         offset: i64,
-        mut reply: ReplyDirectory
+        mut reply: ReplyDirectory,
     ) {
-        // 1. Get the path (CLONE IT to satisfy borrow checker)
-        // We clone() so we own the string and stop borrowing 'self.inode_map'
-        let dir_path = match self.inode_map.get(&ino) {
-            Some(p) => p.clone(), // <--- FIX: Clone the string here
-            None => {
-                return reply.error(ENOENT);
-            }
-        };
+        if ino == SNAPSHOT_DIR_ID {
+            if offset == 0 {
+                let _ = reply.add(SNAPSHOT_DIR_ID, 0, FileType::Directory, ".");
+                let _ = reply.add(FUSE_ROOT_ID, 1, FileType::Directory, "..");
 
-        if offset == 0 {
-            reply.add(1, 0, FileType::Directory, ".");
-            reply.add(1, 1, FileType::Directory, "..");
-
-            let all_files = self.manager.list_files();
-
-            for filename in all_files {
-                if filename == dir_path {
-                    continue;
-                }
-
-                // Logic to check if 'filename' is a direct child of 'dir_path'
-                let is_child = if dir_path.is_empty() {
-                    !filename.contains('/')
-                } else {
-                    if
-                        filename.starts_with(&dir_path) &&
-                        filename.chars().nth(dir_path.len()) == Some('/')
-                    {
-                        let relative_part = &filename[dir_path.len() + 1..];
-                        !relative_part.contains('/')
-                    } else {
-                        false
-                    }
-                };
-
-                if is_child {
-                    let child_inode = calculate_inode(&filename);
-
-                    // We can safely unwrap because we know the file exists in the list
-                    if let Some((_size, kind)) = self.manager.get_file_metadata(&filename) {
-                        let file_type = match kind {
-                            FileKind::File => FileType::RegularFile,
-                            FileKind::Directory => FileType::Directory,
-                        };
-
-                        let name_only = filename.split('/').last().unwrap();
-                        let _ = reply.add(child_inode, offset + 1, file_type, name_only);
-
-                        // NOW this works because 'dir_path' is a clone, not a borrow
-                        self.inode_map.insert(child_inode, filename);
-                    }
+                let snaps = self.snapshots.read().unwrap();
+                for (i, name) in snaps.keys().enumerate() {
+                    let _ = reply.add(FUSE_ROOT_ID, (i + 2) as i64, FileType::Directory, name);
                 }
             }
+            reply.ok();
+            return;
         }
-        reply.ok();
+
+        let registry = self.inode_registry.read().unwrap();
+        if let Some(node) = registry.get(&ino) {
+            let guard = node.read().unwrap();
+
+            if offset == 0 {
+                let _ = reply.add(ino, 0, FileType::Directory, ".");
+                let _ = reply.add(ino, 1, FileType::Directory, "..");
+
+                for (i, (name, child_arc)) in guard.children.iter().enumerate() {
+                    let child = child_arc.read().unwrap();
+                    let _ = reply.add(child.id, (i + 2) as i64, child.attr.kind, name);
+                }
+            }
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
     }
 
-    // 4. READ (Optimized with Inode Map)
     fn read(
         &mut self,
         _req: &Request,
         ino: u64,
         _fh: u64,
         offset: i64,
-        _size: u32,
+        size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-        reply: ReplyData
+        reply: ReplyData,
     ) {
-        // 1. Check RAM Buffer
-        if let Some(buffer) = self.open_files.get(&ino) {
-            let start = offset as usize;
-            if start < buffer.data.len() {
-                let end = std::cmp::min(start + (_size as usize), buffer.data.len());
-                reply.data(&buffer.data[start..end]);
-            } else {
-                reply.data(&[]);
-            }
-            return;
-        }
-
-        // 2. Check Backend using MAP (Fast!)
-        if let Some(filename) = self.inode_map.get(&ino) {
-            match self.manager.read_file(filename) {
-                Ok(data) => {
-                    let start = offset as usize;
-                    if start < data.len() {
-                        let end = std::cmp::min(start + (_size as usize), data.len());
-                        reply.data(&data[start..end]);
-                    } else {
-                        reply.data(&[]);
-                    }
-                }
-                Err(_) => reply.error(libc::EIO),
-            }
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
-    // =======================================================================
-    // NEW: WRITE SUPPORT (FIXED)
-    // =======================================================================
-
-    // 5. CREATE (Supports Nesting)
-    fn create(
-        &mut self,
-        _req: &Request,
-        parent: u64,
-        name: &OsStr,
-        _mode: u32,
-        _umask: u32,
-        _flags: i32,
-        reply: ReplyCreate
-    ) {
-        let name_str = name.to_str().unwrap();
-
-        // 1. Resolve Parent
-        let parent_path = match self.inode_map.get(&parent) {
+        let path = match self.get_path_from_inode(ino) {
             Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
+            None => return reply.error(ENOENT),
+        };
+
+        match self.manager.read_file(&path) {
+            Ok(data) => {
+                let start = offset as usize;
+                if start < data.len() {
+                    let end = std::cmp::min(start + (size as usize), data.len());
+                    reply.data(&data[start..end]);
+                } else {
+                    reply.data(&[]);
+                }
             }
-        };
-
-        // 2. Build Full Path
-        let full_path = if parent_path.is_empty() {
-            name_str.to_string()
-        } else {
-            format!("{}/{}", parent_path, name_str)
-        };
-
-        let inode = calculate_inode(&full_path);
-
-        // 3. Initialize Buffer
-        let buffer = WriteBuffer {
-            filename: full_path.clone(),
-            data: Vec::new(),
-        };
-        self.open_files.insert(inode, buffer);
-
-        // 4. Update Map immediately
-        self.inode_map.insert(inode, full_path);
-
-        let attr = FileAttr {
-            ino: inode,
-            size: 0,
-            blocks: 0,
-            atime: SystemTime::now(),
-            mtime: SystemTime::now(),
-            ctime: SystemTime::now(),
-            crtime: SystemTime::now(),
-            kind: FileType::RegularFile,
-            perm: 0o644,
-            nlink: 1,
-            uid: 1000,
-            gid: 1000,
-            rdev: 0,
-            flags: 0,
-            blksize: 512,
-        };
-        reply.created(&TTL, &attr, 0, 0, 0);
+            Err(_) => reply.error(libc::EIO),
+        }
     }
 
-    // 6. WRITE
     fn write(
         &mut self,
         _req: &Request,
@@ -428,21 +438,180 @@ impl Filesystem for BetterFS {
         _write_flags: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-        reply: ReplyWrite
+        reply: ReplyWrite,
     ) {
-        if let Some(buffer) = self.open_files.get_mut(&ino) {
-            let end = (offset as usize) + data.len();
-            if end > buffer.data.len() {
-                buffer.data.resize(end, 0);
+        let path = match self.get_path_from_inode(ino) {
+            Some(p) => p,
+            None => return reply.error(ENOENT),
+        };
+
+        println!("[WRITE] Request to modify '{}'", path);
+
+        match self.get_mutable_inode(&path) {
+            Ok(inode_arc) => {
+                let mut file_data = self.manager.read_file(&path).unwrap_or_default();
+
+                let end = (offset as usize) + data.len();
+                if end > file_data.len() {
+                    file_data.resize(end, 0);
+                }
+                file_data[offset as usize..end].copy_from_slice(data);
+
+                if self.manager.write_file(&path, &file_data).is_err() {
+                    return reply.error(libc::EIO);
+                }
+
+                // Update inode size after successful write
+                let mut inode = inode_arc.write().unwrap();
+                inode.attr.size = file_data.len() as u64;
+                inode.attr.blocks = (file_data.len() as u64).div_ceil(512);
+                inode.attr.mtime = SystemTime::now();
+                drop(inode);
+
+                reply.written(data.len() as u32);
             }
-            buffer.data[offset as usize..end].copy_from_slice(data);
-            reply.written(data.len() as u32);
-        } else {
-            reply.error(ENOENT);
+            Err(e) => reply.error(e),
         }
     }
 
-    // 7. SETATTR
+    fn create(
+        &mut self,
+        _req: &Request,
+        parent: u64,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        _flags: i32,
+        reply: ReplyCreate,
+    ) {
+        let name_str = name.to_str().unwrap();
+
+        // [CoW] Trigger CoW on parent path before modification
+        if let Some(parent_path) = self.get_path_from_inode(parent) {
+            println!(
+                "[CREATE] Ensuring parent '{}' is mutable",
+                if parent_path.is_empty() {
+                    "/"
+                } else {
+                    &parent_path
+                }
+            );
+            let _ = self.get_mutable_inode(&parent_path);
+        }
+
+        let registry = self.inode_registry.read().unwrap();
+        let parent_node = match registry.get(&parent) {
+            Some(node) => node.clone(),
+            None => {
+                return reply.error(ENOENT);
+            }
+        };
+        drop(registry);
+
+        let mut parent_guard = parent_node.write().unwrap();
+
+        let new_id = self.generate_id();
+        let new_inode = Inode::new(new_id, FileType::RegularFile);
+        let new_arc = Arc::new(RwLock::new(new_inode));
+
+        self.inode_registry
+            .write()
+            .unwrap()
+            .insert(new_id, new_arc.clone());
+        parent_guard
+            .children
+            .insert(name_str.to_string(), new_arc.clone());
+
+        let attr = new_arc.read().unwrap().attr;
+        reply.created(&TTL, &attr, 0, 0, 0);
+    }
+
+    fn mkdir(
+        &mut self,
+        _req: &Request,
+        parent: u64,
+        name: &OsStr,
+        _mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
+        let name_str = name.to_str().unwrap();
+
+        if let Some(snap_name) = name_str.strip_prefix(".snap_") {
+            println!("[CHRONOS] Taking Snapshot: {}", snap_name);
+
+            let frozen_root = self.root.clone();
+            let count = Arc::strong_count(&frozen_root);
+            println!("[GC] Root Inode ref_count: {}", count);
+
+            let timestamp = SystemTime::now();
+            let mut snaps = self.snapshots.write().unwrap();
+
+            snaps.insert(
+                snap_name.to_string(),
+                Snapshot {
+                    name: snap_name.to_string(),
+                    timestamp,
+                    root: frozen_root,
+                },
+            );
+
+            // Persist snapshot metadata to disk
+            let unix_timestamp = timestamp
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let root_id = self.root.read().unwrap().id;
+            if let Err(e) = self
+                .manager
+                .save_snapshot(snap_name, unix_timestamp, root_id)
+            {
+                println!("[CHRONOS] Warning: Failed to persist snapshot: {}", e);
+            }
+
+            return reply.entry(&TTL, &dir_attr(9999), 0);
+        }
+
+        // [CoW] Trigger CoW on parent path before modification
+        if let Some(parent_path) = self.get_path_from_inode(parent) {
+            println!(
+                "[MKDIR] Ensuring parent '{}' is mutable",
+                if parent_path.is_empty() {
+                    "/"
+                } else {
+                    &parent_path
+                }
+            );
+            let _ = self.get_mutable_inode(&parent_path);
+        }
+
+        let registry = self.inode_registry.read().unwrap();
+        let parent_node = match registry.get(&parent) {
+            Some(node) => node.clone(),
+            None => {
+                return reply.error(ENOENT);
+            }
+        };
+        drop(registry);
+
+        let mut parent_guard = parent_node.write().unwrap();
+
+        let new_id = self.generate_id();
+        let new_inode = Inode::new(new_id, FileType::Directory);
+        let new_arc = Arc::new(RwLock::new(new_inode));
+
+        self.inode_registry
+            .write()
+            .unwrap()
+            .insert(new_id, new_arc.clone());
+        parent_guard
+            .children
+            .insert(name_str.to_string(), new_arc.clone());
+
+        let child_guard = new_arc.read().unwrap();
+        reply.entry(&TTL, &child_guard.attr, 0);
+    }
+
     fn setattr(
         &mut self,
         _req: &Request,
@@ -459,245 +628,99 @@ impl Filesystem for BetterFS {
         _chgtime: Option<std::time::SystemTime>,
         _bkuptime: Option<std::time::SystemTime>,
         _flags: Option<u32>,
-        reply: ReplyAttr
+        reply: ReplyAttr,
     ) {
-        if let Some(new_size) = size {
-            if let Some(buffer) = self.open_files.get_mut(&ino) {
-                buffer.data.resize(new_size as usize, 0);
+        // [CoW] Trigger CoW if truncating/modifying file size
+        if let Some(new_size) = size
+            && let Some(path) = self.get_path_from_inode(ino) {
+                println!("[SETATTR] Truncating '{}' to {} bytes", path, new_size);
+
+                match self.get_mutable_inode(&path) {
+                    Ok(inode_arc) => {
+                        // Perform truncation
+                        let mut file_data = self.manager.read_file(&path).unwrap_or_default();
+                        file_data.resize(new_size as usize, 0);
+
+                        if self.manager.write_file(&path, &file_data).is_err() {
+                            return reply.error(libc::EIO);
+                        }
+
+                        // Update inode attributes
+                        let mut inode = inode_arc.write().unwrap();
+                        inode.attr.size = new_size;
+                        inode.attr.blocks = new_size.div_ceil(512);
+                        inode.attr.mtime = SystemTime::now();
+                        drop(inode);
+                    }
+                    Err(e) => {
+                        return reply.error(e);
+                    }
+                }
             }
-        }
+
         self.getattr(_req, ino, reply);
     }
 
-    // 8. RELEASE: Fixed return type (ReplyEmpty)
+    fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
+        reply.opened(0, 0);
+    }
+
     fn release(
         &mut self,
         _req: &Request,
-        ino: u64,
+        _ino: u64,
         _fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
-        reply: ReplyEmpty
+        reply: ReplyEmpty,
     ) {
-        if let Some(buffer) = self.open_files.remove(&ino) {
-            println!("FUSE: Flushing '{}' to Storage...", buffer.filename);
-            let _ = self.manager.write_file(&buffer.filename, &buffer.data);
-        }
         reply.ok();
     }
 
-    // 9. UNLINK (Fix: Resolve path from parent)
     fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         let name_str = name.to_str().unwrap();
 
-        // 1. Resolve Parent
-        let parent_path = match self.inode_map.get(&parent) {
-            Some(p) => p,
+        let registry = self.inode_registry.read().unwrap();
+        let parent_node = match registry.get(&parent) {
+            Some(node) => node.clone(),
             None => {
                 return reply.error(ENOENT);
             }
         };
+        drop(registry);
 
-        // 2. Build Full Path
-        let full_path = if parent_path.is_empty() {
-            name_str.to_string()
-        } else {
-            format!("{}/{}", parent_path, name_str)
-        };
+        let mut parent_guard = parent_node.write().unwrap();
 
-        // 3. Delete from Backend
-        if let Ok(_) = self.manager.delete_file(&full_path) {
-            let inode = calculate_inode(&full_path);
-
-            // 4. Clean up Memory
-            self.open_files.remove(&inode);
-            self.inode_map.remove(&inode);
-
+        if parent_guard.children.remove(name_str).is_some() {
             reply.ok();
         } else {
             reply.error(ENOENT);
         }
     }
 
-    // 10. RENAME (Fix: Resolve both paths)
-    fn rename(
-        &mut self,
-        _req: &Request,
-        parent: u64,
-        name: &OsStr,
-        newparent: u64,
-        newname: &OsStr,
-        _flags: u32,
-        reply: ReplyEmpty
-    ) {
-        let name_str = name.to_str().unwrap();
-        let new_name_str = newname.to_str().unwrap();
-
-        // 1. Resolve Old Path
-        let parent_path = match self.inode_map.get(&parent) {
-            Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
-            }
-        };
-        let old_path = if parent_path.is_empty() {
-            name_str.to_string()
-        } else {
-            format!("{}/{}", parent_path, name_str)
-        };
-
-        // 2. Resolve New Path
-        let new_parent_path = match self.inode_map.get(&newparent) {
-            Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
-            }
-        };
-        let new_path = if new_parent_path.is_empty() {
-            new_name_str.to_string()
-        } else {
-            format!("{}/{}", new_parent_path, new_name_str)
-        };
-
-        // 3. Rename in Backend
-        if let Ok(_) = self.manager.rename_file(&old_path, &new_path) {
-            // 4. Update Maps
-            let old_inode = calculate_inode(&old_path);
-            let new_inode = calculate_inode(&new_path);
-
-            // If it was open, move the buffer
-            if let Some(mut buffer) = self.open_files.remove(&old_inode) {
-                buffer.filename = new_path.clone();
-                self.open_files.insert(new_inode, buffer);
-            }
-
-            // Update Inode Map
-            self.inode_map.remove(&old_inode);
-            self.inode_map.insert(new_inode, new_path);
-
-            reply.ok();
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
-    // 11. OPEN (Optimized with Inode Map)
-    fn open(&mut self, _req: &Request, ino: u64, flags: i32, reply: ReplyOpen) {
-        let is_read_only = (flags & libc::O_ACCMODE) == libc::O_RDONLY;
-        if is_read_only {
-            reply.opened(0, 0);
-            return;
-        }
-
-        if self.open_files.contains_key(&ino) {
-            reply.opened(0, 0);
-            return;
-        }
-
-        // Use Map instead of listing all files
-        if let Some(filename) = self.inode_map.get(&ino) {
-            if let Ok(data) = self.manager.read_file(filename) {
-                let buffer = WriteBuffer {
-                    filename: filename.clone(),
-                    data: data,
-                };
-                self.open_files.insert(ino, buffer);
-                reply.opened(0, 0);
-                return;
-            }
-        }
-        reply.opened(0, 0);
-    }
-
-    // 12. MKDIR (Supports Nesting)
-    fn mkdir(
-        &mut self,
-        _req: &Request,
-        parent: u64,
-        name: &OsStr,
-        _mode: u32,
-        _umask: u32,
-        reply: ReplyEntry
-    ) {
-        let name_str = name.to_str().unwrap();
-
-        // 1. Resolve Parent
-        let parent_path = match self.inode_map.get(&parent) {
-            Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
-            }
-        };
-
-        // 2. Build Full Path
-        let full_path = if parent_path.is_empty() {
-            name_str.to_string()
-        } else {
-            format!("{}/{}", parent_path, name_str)
-        };
-
-        // 3. Create
-        if let Ok(_) = self.manager.create_directory(&full_path) {
-            let inode = calculate_inode(&full_path);
-
-            // 4. Update Map
-            self.inode_map.insert(inode, full_path);
-
-            let attr = FileAttr {
-                ino: inode,
-                size: 0,
-                blocks: 0,
-                atime: SystemTime::now(),
-                mtime: SystemTime::now(),
-                ctime: SystemTime::now(),
-                crtime: SystemTime::now(),
-                kind: FileType::Directory,
-                perm: 0o755,
-                nlink: 2,
-                uid: 1000,
-                gid: 1000,
-                rdev: 0,
-                flags: 0,
-                blksize: 512,
-            };
-            reply.entry(&TTL, &attr, 0);
-        } else {
-            reply.error(ENOENT);
-        }
-    }
-
-    // 13. RMDIR
     fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         let name_str = name.to_str().unwrap();
 
-        // 1. Resolve Parent Path
-        let parent_path = match self.inode_map.get(&parent) {
-            Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
+        // Special case: Deleting snapshots
+        if parent == SNAPSHOT_DIR_ID {
+            let mut snaps = self.snapshots.write().unwrap();
+            if snaps.remove(name_str).is_some() {
+                println!("[CHRONOS] Deleted snapshot: {}", name_str);
+
+                // Remove from persistent storage
+                if let Err(e) = self.manager.delete_snapshot(name_str) {
+                    println!(
+                        "[CHRONOS] Warning: Failed to delete snapshot metadata: {}",
+                        e
+                    );
+                }
+
+                return reply.ok();
             }
-        };
-
-        // 2. Build Full Path
-        let full_path = if parent_path.is_empty() {
-            name_str.to_string()
-        } else {
-            format!("{}/{}", parent_path, name_str)
-        };
-
-        // 3. Remove from Database
-        // Note: Real filesystems check if the directory is empty first.
-        // We are skipping that check for simplicity (allowing "force" delete).
-        if let Ok(_) = self.manager.delete_file(&full_path) {
-            let inode = calculate_inode(&full_path);
-
-            // 4. Clean up Memory
-            self.inode_map.remove(&inode);
-
-            reply.ok();
-        } else {
-            reply.error(ENOENT);
+            return reply.error(ENOENT);
         }
+
+        self.unlink(_req, parent, name, reply);
     }
 }

@@ -1,7 +1,7 @@
 // src/storage.rs
-use sha2::{ Sha256, Digest };
-use std::fs::{ self, File };
-use std::io::{ Read, Write };
+use sha2::{Digest, Sha256};
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 
 pub struct Storage {
@@ -52,7 +52,10 @@ impl Storage {
         let file_path = subdir.join(&hash[2..]);
 
         if !file_path.exists() {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Chunk not found"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Chunk not found",
+            ));
         }
 
         // Read compressed file
@@ -68,7 +71,7 @@ impl Storage {
     pub fn list_all_chunks(&self) -> Result<Vec<String>, std::io::Error> {
         let mut chunks = Vec::new();
         let cas_dir = self.root_dir.join("cas");
-        
+
         if !cas_dir.exists() {
             return Ok(chunks);
         }
@@ -80,12 +83,12 @@ impl Storage {
             if path.is_dir() {
                 // The folder name is the first 2 chars of hash
                 let prefix = entry.file_name().into_string().unwrap();
-                
+
                 // Iterate over files inside (the rest of the hash)
                 for file_entry in fs::read_dir(path)? {
                     let file_entry = file_entry?;
                     let suffix = file_entry.file_name().into_string().unwrap();
-                    
+
                     // Reconstruct full hash
                     chunks.push(format!("{}{}", prefix, suffix));
                 }
@@ -101,11 +104,10 @@ impl Storage {
             fs::remove_file(file_path)?;
         }
         // Optional: Remove subdir if empty
-        let _ = fs::remove_dir(subdir); 
+        let _ = fs::remove_dir(subdir);
         Ok(())
     }
 }
-
 
 // src/storage.rs (Replace the bottom testing section)
 
@@ -122,14 +124,14 @@ mod tests {
             fs::remove_dir_all(test_dir).unwrap();
         }
         let store = Storage::new(test_dir);
-        
+
         let data1 = b"Hello World";
         let data2 = b"Hello World"; // Same data
         let data3 = b"Different Data";
 
         // 1. Write first chunk (FIX: Added .unwrap())
         let hash1 = store.write_chunk(data1).expect("Write failed");
-        
+
         // 2. Write duplicate (FIX: Added .unwrap())
         let hash2 = store.write_chunk(data2).expect("Write failed");
         assert_eq!(hash1, hash2, "Hashes must match for identical data");
@@ -154,24 +156,24 @@ mod tests {
             fs::remove_dir_all(test_dir).unwrap();
         }
         let store = Storage::new(test_dir);
-        
+
         // 2. Create data
         // We use a repeatable pattern to check compression
-        let original_data = b"Restless rust rusts fast. ".repeat(1000); 
-        
+        let original_data = b"Restless rust rusts fast. ".repeat(1000);
+
         // 3. Write
         println!("Writing data...");
         let hash = store.write_chunk(&original_data).expect("Write failed");
         println!("Written Hash: {}", hash);
-        
+
         // 4. Read
         println!("Reading data...");
         let loaded_data = store.read_chunk(&hash).expect("Read failed");
-        
+
         // 5. Verify
         assert_eq!(original_data.to_vec(), loaded_data, "Data mismatch!");
         println!("Success! Data matches.");
-        
+
         // Cleanup
         fs::remove_dir_all(test_dir).unwrap();
     }

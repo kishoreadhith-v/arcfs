@@ -2,10 +2,10 @@
 
 #[path = "../src/chunker.rs"]
 mod chunker;
-#[path = "../src/storage.rs"]
-mod storage;
 #[path = "../src/file_manager.rs"]
 mod file_manager;
+#[path = "../src/storage.rs"]
+mod storage;
 
 use file_manager::FileManager;
 use std::fs;
@@ -58,7 +58,9 @@ fn test_3_persistence_check() {
     let manager = FileManager::new(TEST_DB);
 
     // 3. Read it back
-    let data = manager.read_file("resume.pdf").expect("File vanished after restart!");
+    let data = manager
+        .read_file("resume.pdf")
+        .expect("File vanished after restart!");
     assert_eq!(data, b"Important Data");
 }
 
@@ -73,7 +75,9 @@ fn test_4_large_file_stress() {
         .collect();
 
     let start = std::time::Instant::now();
-    manager.write_file("large_video.mp4", &data).expect("Write failed");
+    manager
+        .write_file("large_video.mp4", &data)
+        .expect("Write failed");
     let duration = start.elapsed();
 
     println!("Processed 1MB in {:?}", duration);

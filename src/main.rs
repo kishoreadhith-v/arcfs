@@ -1,16 +1,16 @@
 // src/main.rs
 mod chunker;
-mod storage;
 mod file_manager;
 mod fuse_handler;
+mod storage;
 
-use clap::{ Parser, Subcommand };
+use crate::file_manager::FileRecipe;
+use clap::{Parser, Subcommand};
 use file_manager::FileManager;
-use std::path::PathBuf;
 use std::fs;
 use std::io::Write; // Needed for flushing output
-use crate::file_manager::FileRecipe;
-use fuser::{ MountOption, Session }; // Ensure you have fuser imports
+use std::path::PathBuf;
+// use fuser::{ MountOption, Session }; // Unused but kept for future use
 
 // 1. Define the Command Line Interface (CLI)
 #[derive(Parser)]
@@ -106,7 +106,7 @@ fn main() {
             let options = vec![
                 fuser::MountOption::RW, // Read-Only
                 fuser::MountOption::FSName("betterfs".to_string()),
-                fuser::MountOption::AutoUnmount // Helps clean up on exit
+                fuser::MountOption::AutoUnmount, // Helps clean up on exit
             ];
 
             let fs_impl = fuse_handler::BetterFS::new(manager);
@@ -118,42 +118,37 @@ fn main() {
             // Open the DB directly for reading
             let db = sled::open(&db_path).expect("Failed to open DB");
 
-            for item in db.iter() {
-                if let Ok((key, value)) = item {
-                    let key_str = String::from_utf8_lossy(&key);
+            for (key, value) in db.iter().flatten() {
+                let key_str = String::from_utf8_lossy(&key);
 
-                    // Try to decode as a FileRecipe
-                    // FIX 4: Use 'crate::file_manager' instead of 'better_fs::...'
-                    match bincode::deserialize::<FileRecipe>(&value) {
-                        Ok(recipe) => {
-                            let kind_str = match recipe.kind {
-                                file_manager::FileKind::Directory => "DIR",
-                                file_manager::FileKind::File => "FILE",
-                            };
-                            println!(
-                                "[{}] {} \t(Size: {} bytes, Chunks: {})",
-                                kind_str,
-                                key_str,
-                                recipe.file_size,
-                                recipe.chunks.len()
-                            );
-                        }
-                        Err(_) => {
-                            // If it fails, it might be raw data or something else
-                            println!("[???] {} \t(Raw Data)", key_str);
-                        }
+                // Try to decode as a FileRecipe
+                match bincode::deserialize::<FileRecipe>(&value) {
+                    Ok(recipe) => {
+                        let kind_str = match recipe.kind {
+                            file_manager::FileKind::Directory => "DIR",
+                            file_manager::FileKind::File => "FILE",
+                        };
+                        println!(
+                            "[{}] {} \t(Size: {} bytes, Chunks: {})",
+                            kind_str,
+                            key_str,
+                            recipe.file_size,
+                            recipe.chunks.len()
+                        );
+                    }
+                    Err(_) => {
+                        // If it fails, it might be raw data or something else
+                        println!("[???] {} \t(Raw Data)", key_str);
                     }
                 }
             }
             println!("---------------------------");
         }
-        
+
         // Garbage Collection Command
-        Commands::Gc => {
-            match manager.run_gc() {
-                Ok(count) => println!("Successfully removed {} orphaned chunks.", count),
-                Err(e) => eprintln!("GC Failed: {}", e),
-            }
-        }
+        Commands::Gc => match manager.run_gc() {
+            Ok(count) => println!("Successfully removed {} orphaned chunks.", count),
+            Err(e) => eprintln!("GC Failed: {}", e),
+        },
     }
 }

@@ -1,9 +1,9 @@
 // src/file_manager.rs
 use crate::chunker::Chunker;
 use crate::storage::Storage;
-use serde::{ Deserialize, Serialize };
-use std::path::Path;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FileKind {
@@ -19,6 +19,7 @@ pub struct FileRecipe {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[allow(dead_code)]
 pub struct DirEntry {
     pub name: String,
     pub kind: FileKind,
@@ -29,6 +30,14 @@ pub struct DirEntry {
 pub struct FileManager {
     storage: Storage,
     db: sled::Db,
+}
+
+// Snapshot metadata for persistence
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SnapshotMetadata {
+    pub name: String,
+    pub timestamp: u64, // Unix timestamp
+    pub root_id: u64,   // Inode ID of snapshot root
 }
 
 impl FileManager {
@@ -43,6 +52,52 @@ impl FileManager {
         FileManager { storage, db }
     }
 
+    // Save snapshot metadata to database
+    pub fn save_snapshot(&self, name: &str, timestamp: u64, root_id: u64) -> Result<(), String> {
+        let key = format!("snapshot:{}", name);
+        let metadata = SnapshotMetadata {
+            name: name.to_string(),
+            timestamp,
+            root_id,
+        };
+
+        let encoded = bincode::serialize(&metadata)
+            .map_err(|e| format!("Snapshot serialization error: {}", e))?;
+
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+
+        println!("[CHRONOS] Snapshot '{}' metadata persisted to disk", name);
+        Ok(())
+    }
+
+    // Load all snapshot metadata from database
+    pub fn load_snapshots(&self) -> Vec<SnapshotMetadata> {
+        let mut snapshots = Vec::new();
+        let prefix = b"snapshot:";
+
+        for item in self.db.scan_prefix(prefix).flatten() {
+            if let Ok(metadata) = bincode::deserialize::<SnapshotMetadata>(&item.1) {
+                snapshots.push(metadata);
+            }
+        }
+
+        println!("[CHRONOS] Loaded {} snapshot(s) from disk", snapshots.len());
+        snapshots
+    }
+
+    // Delete snapshot metadata
+    pub fn delete_snapshot(&self, name: &str) -> Result<(), String> {
+        let key = format!("snapshot:{}", name);
+        self.db
+            .remove(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+        Ok(())
+    }
+
     // =======================================================================
     // PUBLIC API (What the FUSE Frontend will call)
     // =======================================================================
@@ -53,17 +108,22 @@ impl FileManager {
         let recipe = self.create_recipe_from_data(data);
 
         // B. Convert the Recipe struct into bytes (Serialization)
-        let encoded_recipe = bincode
-            ::serialize(&recipe)
-            .map_err(|e| format!("Serialization error: {}", e))?;
+        let encoded_recipe =
+            bincode::serialize(&recipe).map_err(|e| format!("Serialization error: {}", e))?;
 
         // C. Save to Database (Key: Filename, Value: RecipeBytes)
-        self.db.insert(filename, encoded_recipe).map_err(|e| format!("Database error: {}", e))?;
+        self.db
+            .insert(filename, encoded_recipe)
+            .map_err(|e| format!("Database error: {}", e))?;
 
         // Ensure data is flushed to disk immediately
         self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
 
-        println!("Debug: Saved recipe for '{}' ({} chunks)", filename, recipe.chunks.len());
+        println!(
+            "Debug: Saved recipe for '{}' ({} chunks)",
+            filename,
+            recipe.chunks.len()
+        );
         Ok(())
     }
 
@@ -73,8 +133,7 @@ impl FileManager {
         match self.db.get(filename) {
             Ok(Some(bytes)) => {
                 // B. Decode the binary back into a Struct
-                let recipe: FileRecipe = bincode
-                    ::deserialize(&bytes)
+                let recipe: FileRecipe = bincode::deserialize(&bytes)
                     .map_err(|e| format!("Deserialization error: {}", e))?;
 
                 // C. Safety check for Directories
@@ -89,7 +148,10 @@ impl FileManager {
                     match self.storage.read_chunk(&hash) {
                         Ok(chunk_data) => result.extend_from_slice(&chunk_data),
                         Err(e) => {
-                            return Err(format!("Storage corrupted. Chunk {} missing: {}", hash, e));
+                            return Err(format!(
+                                "Storage corrupted. Chunk {} missing: {}",
+                                hash, e
+                            ));
                         }
                     }
                 }
@@ -105,11 +167,10 @@ impl FileManager {
         let mut files = Vec::new();
         // Iterate over every key in the DB
         for item in self.db.iter() {
-            if let Ok((key, _)) = item {
-                if let Ok(filename) = String::from_utf8(key.to_vec()) {
+            if let Ok((key, _)) = item
+                && let Ok(filename) = String::from_utf8(key.to_vec()) {
                     files.push(filename);
                 }
-            }
         }
         files
     }
@@ -120,7 +181,7 @@ impl FileManager {
 
         // 1. MARK: Collect all hashes currently in use by active files
         let mut active_hashes = HashSet::new();
-        
+
         for item in self.db.iter() {
             let (_, value) = item.map_err(|e| e.to_string())?;
             // Deserialize recipe
@@ -130,10 +191,15 @@ impl FileManager {
                 }
             }
         }
-        println!("GC: Found {} active chunks referenced in DB.", active_hashes.len());
+        println!(
+            "GC: Found {} active chunks referenced in DB.",
+            active_hashes.len()
+        );
 
         // 2. SWEEP: List all chunks on disk
-        let all_chunks_on_disk = self.storage.list_all_chunks()
+        let all_chunks_on_disk = self
+            .storage
+            .list_all_chunks()
             .map_err(|e| format!("Storage error: {}", e))?;
 
         // 3. DESTROY: Delete orphans
@@ -141,13 +207,17 @@ impl FileManager {
         for chunk_hash in all_chunks_on_disk {
             if !active_hashes.contains(&chunk_hash) {
                 // It's an orphan!
-                self.storage.delete_chunk(&chunk_hash)
+                self.storage
+                    .delete_chunk(&chunk_hash)
                     .map_err(|e| format!("Failed to delete {}: {}", chunk_hash, e))?;
                 deleted_count += 1;
             }
         }
-        
-        println!("GC: Cleanup complete. Deleted {} orphaned chunks.", deleted_count);
+
+        println!(
+            "GC: Cleanup complete. Deleted {} orphaned chunks.",
+            deleted_count
+        );
         Ok(deleted_count)
     }
 
@@ -169,11 +239,11 @@ impl FileManager {
             // CHANGED: Simplified logic.
             // We cut if the algorithm says so, AND we have at least 2KB...
             // OR if the buffer gets too big (e.g., 64KB) to prevent massive memory usage.
-            if
-                (chunker.should_cut() && current_chunk_buffer.len() >= 2048) ||
-                current_chunk_buffer.len() >= 65536
+            if (chunker.should_cut() && current_chunk_buffer.len() >= 2048)
+                || current_chunk_buffer.len() >= 65536
             {
-                let hash = self.storage
+                let hash = self
+                    .storage
                     .write_chunk(&current_chunk_buffer)
                     .expect("Failed to write chunk");
                 recipe.push(hash);
@@ -184,7 +254,8 @@ impl FileManager {
 
         // HANDLE THE TAIL (The last piece of the file)
         if !current_chunk_buffer.is_empty() {
-            let hash = self.storage
+            let hash = self
+                .storage
                 .write_chunk(&current_chunk_buffer)
                 .expect("Failed to write tail chunk");
             recipe.push(hash);
@@ -199,6 +270,7 @@ impl FileManager {
     }
 
     /// The core logic from your old read_file
+    #[allow(dead_code)]
     fn reconstruct_from_recipe(&self, recipe: &FileRecipe) -> Vec<u8> {
         let mut data = Vec::new();
 
@@ -227,11 +299,13 @@ impl FileManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn delete_file(&self, filename: &str) -> Result<(), String> {
         self.db.remove(filename).map_err(|e| e.to_string())?;
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn rename_file(&self, old_name: &str, new_name: &str) -> Result<(), String> {
         // 1. Get the recipe for the old name
         if let Some(data) = self.db.get(old_name).map_err(|e| e.to_string())? {
@@ -245,6 +319,7 @@ impl FileManager {
         }
     }
 
+    #[allow(dead_code)]
     pub fn create_directory(&self, path: &str) -> Result<(), String> {
         let recipe = FileRecipe {
             file_size: 0,
@@ -277,7 +352,9 @@ mod tests {
             // 1. Open the manager and save a file
             let manager = FileManager::new(db_path);
             let content = b"This is a test file for the database.";
-            manager.write_file("test.txt", content).expect("Write failed");
+            manager
+                .write_file("test.txt", content)
+                .expect("Write failed");
 
             // Verify it exists in memory
             let loaded = manager.read_file("test.txt").expect("Read failed");
@@ -325,7 +402,8 @@ mod integrity_tests {
         let data = b"A repeatable pattern for testing chunking limits...".repeat(500); // ~25KB
 
         println!("1. Writing file via Manager...");
-        fm.write_file("test_cycle.txt", &data).expect("Manager Write Failed");
+        fm.write_file("test_cycle.txt", &data)
+            .expect("Manager Write Failed");
 
         println!("2. Reading file via Manager...");
         let read_back = fm.read_file("test_cycle.txt").expect("Manager Read Failed");
