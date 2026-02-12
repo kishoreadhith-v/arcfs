@@ -100,18 +100,26 @@ fn main() {
             println!("(Press Ctrl+C to unmount)");
 
             // Ensure the mount point exists
-            fs::create_dir_all(&mount_point).unwrap();
+            if let Err(e) = fs::create_dir_all(&mount_point) {
+                eprintln!("Error: Failed to create mount point: {}", e);
+                return;
+            }
 
             // Start the FUSE Driver
             let options = vec![
-                fuser::MountOption::RW, // Read-Only
+                fuser::MountOption::RW,
                 fuser::MountOption::FSName("betterfs".to_string()),
-                fuser::MountOption::AutoUnmount // Helps clean up on exit
+                fuser::MountOption::AutoUnmount,
             ];
 
             let fs_impl = fuse_handler::BetterFS::new(manager);
 
-            fuser::mount2(fs_impl, mount_point, &options).unwrap();
+            println!("Starting FUSE session...");
+            if let Err(e) = fuser::mount2(fs_impl, mount_point, &options) {
+                eprintln!("Error: Failed to mount filesystem: {}", e);
+                eprintln!("This might be a fuse-t compatibility issue on macOS.");
+                return;
+            }
         }
         Commands::Inspect => {
             println!("--- INSPECTING DATABASE ---");

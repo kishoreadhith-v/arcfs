@@ -1,7 +1,7 @@
 // src/storage.rs
-use sha2::{Digest, Sha256};
-use std::fs::{self, File};
-use std::io::{Read, Write};
+use sha2::{ Digest, Sha256 };
+use std::fs::{ self, File };
+use std::io::{ Read, Write };
 use std::path::PathBuf;
 
 pub struct Storage {
@@ -52,10 +52,7 @@ impl Storage {
         let file_path = subdir.join(&hash[2..]);
 
         if !file_path.exists() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "Chunk not found",
-            ));
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "Chunk not found"));
         }
 
         // Read compressed file
