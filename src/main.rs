@@ -116,21 +116,24 @@ fn main() {
 
             println!("Starting FUSE session...");
 
-            // Use Session API for better compatibility with fuse-t
-            match fuser::Session::new(fs_impl, mount_point.as_ref(), &options) {
-                Ok(mut session) => {
+            // Use spawn_mount for background operation (better for fuse-t)
+            let _handle = match fuser::spawn_mount2(fs_impl, mount_point.as_ref(), &options) {
+                Ok(handle) => {
                     println!("Filesystem mounted successfully!");
-                    println!("Running FUSE event loop...");
-                    match session.run() {
-                        Ok(_) => println!("FUSE session ended cleanly."),
-                        Err(e) => eprintln!("Error during filesystem operation: {}", e),
-                    }
+                    println!("Mount point: {}", mount_point);
+                    println!("Press Ctrl+C to unmount and exit.");
+                    handle
                 }
                 Err(e) => {
-                    eprintln!("Error: Failed to create FUSE session: {}", e);
+                    eprintln!("Error: Failed to mount filesystem: {}", e);
                     eprintln!("Make sure fuse-t is properly installed.");
                     return;
                 }
+            };
+
+            // Keep the main thread alive
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
         }
         Commands::Inspect => {
