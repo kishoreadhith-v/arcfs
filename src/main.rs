@@ -120,8 +120,10 @@ fn main() {
             match fuser::Session::new(fs_impl, mount_point.as_ref(), &options) {
                 Ok(mut session) => {
                     println!("Filesystem mounted successfully!");
-                    if let Err(e) = session.run() {
-                        eprintln!("Error during filesystem operation: {}", e);
+                    println!("Running FUSE event loop...");
+                    match session.run() {
+                        Ok(_) => println!("FUSE session ended cleanly."),
+                        Err(e) => eprintln!("Error during filesystem operation: {}", e),
                     }
                 }
                 Err(e) => {
