@@ -115,10 +115,20 @@ fn main() {
             let fs_impl = fuse_handler::BetterFS::new(manager);
 
             println!("Starting FUSE session...");
-            if let Err(e) = fuser::mount2(fs_impl, mount_point, &options) {
-                eprintln!("Error: Failed to mount filesystem: {}", e);
-                eprintln!("This might be a fuse-t compatibility issue on macOS.");
-                return;
+            
+            // Use Session API for better compatibility with fuse-t
+            match fuser::Session::new(fs_impl, &mount_point, &options) {
+                Ok(mut session) => {
+                    println!("Filesystem mounted successfully!");
+                    if let Err(e) = session.run() {
+                        eprintln!("Error during filesystem operation: {}", e);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: Failed to create FUSE session: {}", e);
+                    eprintln!("Make sure fuse-t is properly installed.");
+                    return;
+                }
             }
         }
         Commands::Inspect => {
