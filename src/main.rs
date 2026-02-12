@@ -109,15 +109,15 @@ fn main() {
             let options = vec![
                 fuser::MountOption::RW,
                 fuser::MountOption::FSName("betterfs".to_string()),
-                fuser::MountOption::AutoUnmount,
+                fuser::MountOption::AutoUnmount
             ];
 
             let fs_impl = fuse_handler::BetterFS::new(manager);
 
             println!("Starting FUSE session...");
-            
+
             // Use Session API for better compatibility with fuse-t
-            match fuser::Session::new(fs_impl, &mount_point, &options) {
+            match fuser::Session::new(fs_impl, mount_point.as_ref(), &options) {
                 Ok(mut session) => {
                     println!("Filesystem mounted successfully!");
                     if let Err(e) = session.run() {
