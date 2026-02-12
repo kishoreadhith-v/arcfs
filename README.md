@@ -171,3 +171,36 @@ echo "hack" > mnt/.snapshots/v1/file.txt  # Permission denied
 ## License
 
 MIT
+
+
+## Read Pipeline
+
+```mermaid
+flowchart TD
+    Start([Incoming Read Request]) --> Lookup[Query Sled DB]
+    
+    subgraph Metadata_Retrieval [Step 1: Recipe Lookup]
+        Lookup <-->|Filename Key| DB[(Metadata DB\nSled)]
+        Lookup --> Check{Found?}
+        Check -- No --> Err([Return Error\nENOENT])
+        Check -- Yes --> Decode[Deserialize Recipe\n(Bincode)]
+    end
+
+    Decode --> Iter[Iterate Chunk Hashes]
+
+    subgraph Reconstruction_Loop [Step 2: Reassembly]
+        Iter --> ReadCAS[Read Chunk File]
+        ReadCAS <-->|Hash Path| CAS[(CAS Storage\n/cas/xx/yyyy)]
+        ReadCAS --> Decomp[Zstd Decompress]
+        Decomp --> Append[Append to Buffer]
+    end
+
+    Append --> More{More Chunks?}
+    More -- Yes --> Iter
+    More -- No --> Finish([Return Reconstructed File])
+
+    %% Styling
+    style Start fill:#fff,stroke:#333,stroke-width:2px
+    style Finish fill:#fff,stroke:#333,stroke-width:2px
+    style DB fill:#eee,stroke:#333
+    style CAS fill:#eee,stroke:#333
