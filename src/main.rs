@@ -5,7 +5,7 @@ mod fuse_handler;
 mod storage;
 
 use crate::file_manager::FileRecipe;
-use clap::{Parser, Subcommand};
+use clap::{ Parser, Subcommand };
 use file_manager::FileManager;
 use std::fs;
 use std::io::Write; // Needed for flushing output
@@ -106,7 +106,7 @@ fn main() {
             let options = vec![
                 fuser::MountOption::RW, // Read-Only
                 fuser::MountOption::FSName("betterfs".to_string()),
-                fuser::MountOption::AutoUnmount, // Helps clean up on exit
+                fuser::MountOption::AutoUnmount // Helps clean up on exit
             ];
 
             let fs_impl = fuse_handler::BetterFS::new(manager);
@@ -146,9 +146,10 @@ fn main() {
         }
 
         // Garbage Collection Command
-        Commands::Gc => match manager.run_gc() {
-            Ok(count) => println!("Successfully removed {} orphaned chunks.", count),
-            Err(e) => eprintln!("GC Failed: {}", e),
-        },
+        Commands::Gc =>
+            match manager.run_gc() {
+                Ok(count) => println!("Successfully removed {} orphaned chunks.", count),
+                Err(e) => eprintln!("GC Failed: {}", e),
+            }
     }
 }

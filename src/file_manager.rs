@@ -1,7 +1,7 @@
 // src/file_manager.rs
 use crate::chunker::Chunker;
 use crate::storage::Storage;
-use serde::{Deserialize, Serialize};
+use serde::{ Deserialize, Serialize };
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -37,7 +37,7 @@ pub struct FileManager {
 pub struct SnapshotMetadata {
     pub name: String,
     pub timestamp: u64, // Unix timestamp
-    pub root_id: u64,   // Inode ID of snapshot root
+    pub root_id: u64, // Inode ID of snapshot root
 }
 
 impl FileManager {
@@ -61,12 +61,11 @@ impl FileManager {
             root_id,
         };
 
-        let encoded = bincode::serialize(&metadata)
+        let encoded = bincode
+            ::serialize(&metadata)
             .map_err(|e| format!("Snapshot serialization error: {}", e))?;
 
-        self.db
-            .insert(key.as_bytes(), encoded)
-            .map_err(|e| format!("Database error: {}", e))?;
+        self.db.insert(key.as_bytes(), encoded).map_err(|e| format!("Database error: {}", e))?;
 
         self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
 
@@ -92,9 +91,7 @@ impl FileManager {
     // Delete snapshot metadata
     pub fn delete_snapshot(&self, name: &str) -> Result<(), String> {
         let key = format!("snapshot:{}", name);
-        self.db
-            .remove(key.as_bytes())
-            .map_err(|e| format!("Database error: {}", e))?;
+        self.db.remove(key.as_bytes()).map_err(|e| format!("Database error: {}", e))?;
         Ok(())
     }
 
@@ -108,22 +105,17 @@ impl FileManager {
         let recipe = self.create_recipe_from_data(data);
 
         // B. Convert the Recipe struct into bytes (Serialization)
-        let encoded_recipe =
-            bincode::serialize(&recipe).map_err(|e| format!("Serialization error: {}", e))?;
+        let encoded_recipe = bincode
+            ::serialize(&recipe)
+            .map_err(|e| format!("Serialization error: {}", e))?;
 
         // C. Save to Database (Key: Filename, Value: RecipeBytes)
-        self.db
-            .insert(filename, encoded_recipe)
-            .map_err(|e| format!("Database error: {}", e))?;
+        self.db.insert(filename, encoded_recipe).map_err(|e| format!("Database error: {}", e))?;
 
         // Ensure data is flushed to disk immediately
         self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
 
-        println!(
-            "Debug: Saved recipe for '{}' ({} chunks)",
-            filename,
-            recipe.chunks.len()
-        );
+        println!("Debug: Saved recipe for '{}' ({} chunks)", filename, recipe.chunks.len());
         Ok(())
     }
 
@@ -133,7 +125,8 @@ impl FileManager {
         match self.db.get(filename) {
             Ok(Some(bytes)) => {
                 // B. Decode the binary back into a Struct
-                let recipe: FileRecipe = bincode::deserialize(&bytes)
+                let recipe: FileRecipe = bincode
+                    ::deserialize(&bytes)
                     .map_err(|e| format!("Deserialization error: {}", e))?;
 
                 // C. Safety check for Directories
@@ -148,10 +141,7 @@ impl FileManager {
                     match self.storage.read_chunk(&hash) {
                         Ok(chunk_data) => result.extend_from_slice(&chunk_data),
                         Err(e) => {
-                            return Err(format!(
-                                "Storage corrupted. Chunk {} missing: {}",
-                                hash, e
-                            ));
+                            return Err(format!("Storage corrupted. Chunk {} missing: {}", hash, e));
                         }
                     }
                 }
@@ -167,10 +157,9 @@ impl FileManager {
         let mut files = Vec::new();
         // Iterate over every key in the DB
         for item in self.db.iter() {
-            if let Ok((key, _)) = item
-                && let Ok(filename) = String::from_utf8(key.to_vec()) {
-                    files.push(filename);
-                }
+            if let Ok((key, _)) = item && let Ok(filename) = String::from_utf8(key.to_vec()) {
+                files.push(filename);
+            }
         }
         files
     }
@@ -191,14 +180,10 @@ impl FileManager {
                 }
             }
         }
-        println!(
-            "GC: Found {} active chunks referenced in DB.",
-            active_hashes.len()
-        );
+        println!("GC: Found {} active chunks referenced in DB.", active_hashes.len());
 
         // 2. SWEEP: List all chunks on disk
-        let all_chunks_on_disk = self
-            .storage
+        let all_chunks_on_disk = self.storage
             .list_all_chunks()
             .map_err(|e| format!("Storage error: {}", e))?;
 
@@ -214,10 +199,7 @@ impl FileManager {
             }
         }
 
-        println!(
-            "GC: Cleanup complete. Deleted {} orphaned chunks.",
-            deleted_count
-        );
+        println!("GC: Cleanup complete. Deleted {} orphaned chunks.", deleted_count);
         Ok(deleted_count)
     }
 
@@ -239,11 +221,11 @@ impl FileManager {
             // CHANGED: Simplified logic.
             // We cut if the algorithm says so, AND we have at least 2KB...
             // OR if the buffer gets too big (e.g., 64KB) to prevent massive memory usage.
-            if (chunker.should_cut() && current_chunk_buffer.len() >= 2048)
-                || current_chunk_buffer.len() >= 65536
+            if
+                (chunker.should_cut() && current_chunk_buffer.len() >= 2048) ||
+                current_chunk_buffer.len() >= 65536
             {
-                let hash = self
-                    .storage
+                let hash = self.storage
                     .write_chunk(&current_chunk_buffer)
                     .expect("Failed to write chunk");
                 recipe.push(hash);
@@ -254,8 +236,7 @@ impl FileManager {
 
         // HANDLE THE TAIL (The last piece of the file)
         if !current_chunk_buffer.is_empty() {
-            let hash = self
-                .storage
+            let hash = self.storage
                 .write_chunk(&current_chunk_buffer)
                 .expect("Failed to write tail chunk");
             recipe.push(hash);
@@ -352,9 +333,7 @@ mod tests {
             // 1. Open the manager and save a file
             let manager = FileManager::new(db_path);
             let content = b"This is a test file for the database.";
-            manager
-                .write_file("test.txt", content)
-                .expect("Write failed");
+            manager.write_file("test.txt", content).expect("Write failed");
 
             // Verify it exists in memory
             let loaded = manager.read_file("test.txt").expect("Read failed");
@@ -402,8 +381,7 @@ mod integrity_tests {
         let data = b"A repeatable pattern for testing chunking limits...".repeat(500); // ~25KB
 
         println!("1. Writing file via Manager...");
-        fm.write_file("test_cycle.txt", &data)
-            .expect("Manager Write Failed");
+        fm.write_file("test_cycle.txt", &data).expect("Manager Write Failed");
 
         println!("2. Reading file via Manager...");
         let read_back = fm.read_file("test_cycle.txt").expect("Manager Read Failed");
