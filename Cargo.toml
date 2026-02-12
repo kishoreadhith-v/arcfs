@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-fuser = "0.12"      # The Rust wrapper for FUSE
+fuser = "0.14"      # Use latest version
 libc = "0.2"        # For System Error Codes (ENOENT, etc.)
 env_logger = "0.10" # For logging
 log = "0.4"
