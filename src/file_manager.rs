@@ -139,7 +139,7 @@ impl FileManager {
                 for hash in recipe.chunks {
                     // We handle the Result from storage.read_chunk here
                     match self.storage.read_chunk(&hash) {
-                        Ok(chunk_data) => result.extend_from_slice(&chunk_data),
+                        Ok(chunk_data) => result.extend_from_slice(&chunk_data[..]),
                         Err(e) => {
                             return Err(format!("Storage corrupted. Chunk {} missing: {}", hash, e));
                         }
@@ -258,7 +258,7 @@ impl FileManager {
         for hash in &recipe.chunks {
             // FIX: Use 'if let Ok' instead of 'if let Some'
             if let Ok(chunk) = self.storage.read_chunk(hash) {
-                data.extend_from_slice(&chunk);
+                data.extend_from_slice(&chunk[..]);
             } else {
                 eprintln!("Warning: Failed to read chunk {}", hash);
             }

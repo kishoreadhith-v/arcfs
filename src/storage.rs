@@ -109,12 +109,6 @@ impl Storage {
     }
 }
 
-// src/storage.rs (Replace the bottom testing section)
-=======
-
-// src/storage.rs 
->>>>>>> d614f2e (clean up)
-
 #[cfg(test)]
 mod tests {
     use super::*;
