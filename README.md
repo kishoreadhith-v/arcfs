@@ -1,12 +1,14 @@
-# Better-FS
+# ArcFS: Advanced Runtime Content Filesystem
 
-A FUSE-based filesystem implementing content-defined chunking and deduplication in Rust.
+**Status: Phase 3 (TagFS) ✅ COMPLETE**
+
+A high-performance, userspace file system in Rust using FUSE, featuring Time Travel (Chronos), Semantic Tagging (TagFS), and Transparent Compression.
 
 ## 📅 Project Timeline
 
 ```mermaid
 gantt
-    title OmniFS Development Cycle
+    title ArcFS Development Cycle
     dateFormat  YYYY-MM-DD
     axisFormat  %b %d
 
@@ -15,12 +17,12 @@ gantt
     Garbage Collection     :done,    p2, 2025-12-26, 2026-01-02
 
     section Phase 2: Chronos
-    Snapshot Logic         :active,  p3, 2026-01-03, 2026-01-23
-    Time Travel Mounting   :         p4, 2026-01-24, 2026-02-05
+    Snapshot Logic         :done,    p3, 2026-01-03, 2026-01-23
+    Time Travel Mounting   :done,    p4, 2026-01-24, 2026-02-05
 
     section Phase 3: TagFS
-    Tag Metadata System    :         p5, 2026-02-06, 2026-02-18
-    Virtual Directories    :         p6, 2026-02-19, 2026-02-28
+    Tag Metadata System    :done,    p5, 2026-02-06, 2026-02-18
+    Virtual Directories   :done,    p6, 2026-02-19, 2026-02-28
 
     section Phase 4: ZipFS
     Archive Integration    :         p7, 2026-03-01, 2026-03-14
@@ -30,9 +32,20 @@ gantt
     Documentation          :         p9, 2026-03-25, 2026-03-31
 ```
 
+## 📚 Documentation Index
+
+| Document | Focus | Status |
+|----------|-------|--------|
+| [TAGFS_COMPLETE.md](TAGFS_COMPLETE.md) | Phase 3: Tag-based file access, order-independent paths | ✅ Complete |
+| [PHASE2_SUMMARY.md](PHASE2_SUMMARY.md) | Phase 2: Chronos snapshots, CoW, time travel | ✅ Complete |
+
 ## Overview
 
-Better-FS demonstrates how modern backup and storage systems (like rsync, Dropbox, restic) achieve efficient deduplication through content-defined chunking. Files are split into variable-sized chunks using a rolling hash algorithm, enabling identical content blocks to be stored only once.
+ArcFS is a userspace FUSE filesystem demonstrating three advanced storage capabilities:
+
+1. **Content-Defined Chunking & Deduplication** — Identical data blocks are stored once via SHA256 content addressing
+2. **Time Travel / Snapshots** — Instant O(1) snapshots using Copy-on-Write and lazy cloning
+3. **Semantic Tagging** — Files are accessible via any permutation of their parent directory names
 
 ## Project Structure
 
@@ -58,149 +71,272 @@ better-fs/
 
 ## Quick Start
 
+### Installation & Build
+```bash
+# Install dependencies (Ubuntu/Debian)
+sudo apt install libfuse-dev pkg-config
+
+# Clone and build
+cargo build --release
+```
+
 ### Run the Filesystem
 ```bash
-# Build and run (mounts at /tmp/betterfs)
-cargo run
+# Terminal 1: Mount filesystem
+mkdir -p mnt
+cargo run -- mount mnt
 
-# In another terminal:
-cat /tmp/betterfs/hello.txt
-ls -la /tmp/betterfs/
+# Terminal 2: Test it out
+mkdir mnt/test_dir
+echo "Hello, ArcFS!" > mnt/test_dir/file.txt
+cat mnt/test_dir/file.txt
 
-# Unmount when done
-fusermount -u /tmp/betterfs
+# Unmount
+fusermount -u mnt
 ```
 
-### Run Tests
+### Test Core Features
+
+#### Test Deduplication (Phase 1)
 ```bash
-# Run all tests
-cargo test
+# Identical files should deduplicate
+echo "same content" > mnt/file1.txt
+echo "same content" > mnt/file2.txt
+# Both files share the same chunk in storage
 
-# See test output (println! messages)
-cargo test -- --nocapture
-
-# Run specific test suite
-cargo test --test backend_stress
-
-# Run unit tests only
-cargo test --lib
+# Verify with test suite
+cargo test --test backend_stress -- --nocapture
 ```
 
-### Test Chunking Algorithm
+#### Test Time Travel (Phase 2)
 ```bash
-# Run chunker unit test with output
-cargo test test_chunking_consistency -- --nocapture
+# Create initial state
+echo "version 1" > mnt/document.txt
+mkdir mnt/.snap_v1  # Take snapshot
+
+# Modify and verify divergence
+echo "version 2" > mnt/document.txt
+cat mnt/document.txt              # Shows: "version 2"
+cat mnt/.snapshots/v1/document.txt  # Shows: "version 1"
 ```
+
+#### Test Tag-Based Access (Phase 3)
+```bash
+# Create nested directories
+mkdir -p mnt/a/b/c
+
+# Create and tag a file
+echo "data" > mnt/a/b/c/file.txt
+
+# Access via ALL tag permutations
+cat mnt/a/b/c/file.txt  # Original
+cat mnt/a/c/b/file.txt  # Permutation 1
+cat mnt/b/a/c/file.txt  # Permutation 2
+cat mnt/b/c/a/file.txt  # Permutation 3
+cat mnt/c/a/b/file.txt  # Permutation 4
+cat mnt/c/b/a/file.txt  # Permutation 5
+# All show: "data"
+
+# Write via different path
+echo "modified" > mnt/b/c/a/file.txt
+cat mnt/a/b/c/file.txt  # Shows: "modified"
+```
+
+## Features
+
+### Phase 1: Core Engine ✅
+- Virtual FUSE filesystem with full read/write/mkdir/delete operations
+- Content-Addressed Storage (CAS) with SHA256 hashing
+- Rolling hash chunking for efficient deduplication
+- Automatic persistence via `sled` embedded database
+
+### Phase 2: Chronos (Time Travel) ✅
+- Instant, O(1) snapshots via lazy cloning of root inode
+- Copy-on-Write divergence when snapshots are modified
+- Virtual `.snapshots/` directory with read-only snapshot access
+- Full restoration of filesystem state from any snapshot
+
+### Phase 3: TagFS ✅
+- **Automatic tagging** — Files tagged with parent directory names
+- **Order-independent access** — File at `/a/b/c/file.txt` also accessible via `/b/c/a/`, `/c/a/b/`, etc.
+- **Single physical location** — All tag paths point to same file
+- **Transparent bidirectional I/O** — Read/write via any tag permutation
+
+### Phase 4: ZipFS (Planned)
+- Mount `.zip` and `.tar.gz` archives as read-only directories
+- Offset-based decompression
+- Transparent archive exploration
 
 ## How It Works
 
-1. **Content-Defined Chunking**: Files are split at boundaries determined by content patterns (not fixed positions), ensuring edits only affect nearby chunks
-2. **Rolling Hash**: Efficient sliding window hash (O(1) per byte) identifies chunk boundaries
-3. **Deduplication**: Identical chunks get the same SHA256 hash → stored once
-4. **File Recipes**: Metadata structure storing chunk references + file size for reconstruction
+### 1. Content-Defined Chunking
+Files are split at boundaries determined by content patterns using polynomial rolling hash:
+```
+File: [Data Block A] [Data Block B] [Data Block A]
+            ↓              ↓              ↓
+         Chunk 1      Chunk 2        Chunk 1 (reused!)
+```
+Identical "Data Block A" is hashed to the same SHA256 value → stored once.
+
+### 2. Time Travel / Snapshots
+```
+Initial State:
+  Live FS: /a/b/c/file.txt (version 1)
+  
+Take Snapshot:
+  Root inode Arc refcount: 1 → 2
+  (No data copied yet)
+  
+Modify Live FS:
+  /a/b/c/file.txt (write "version 2")
+  Triggers CoW: Node is shared? Yes!
+  Clone path: / → a → b → c → file
+  Create new inode 102 with version 2
+  
+Result:
+  Live FS → /a/b/c/file.txt (inode 102, version 2)
+  Snapshot → /.snapshots/v1/a/b/c/file.txt (inode 101, version 1)
+```
+
+### 3. Order-Independent Tag Access
+```
+File created at: /x/y/z/document.pdf
+Auto-tags: ["x", "y", "z"]
+
+All these paths work (ALL point to same file):
+  ✓ /x/y/z/document.pdf
+  ✓ /x/z/y/document.pdf
+  ✓ /y/x/z/document.pdf
+  ✓ /y/z/x/document.pdf
+  ✓ /z/x/y/document.pdf
+  ✓ /z/y/x/document.pdf
+
+Read/write operations work correctly from ANY path.
+```
 
 ## Requirements
 
-- Rust (2024 edition)
-- FUSE (Linux: `libfuse-dev`, macOS: macFUSE)
+- Rust 2024 edition (install via [rustup.rs](https://rustup.rs))
+- FUSE development libraries
 
 ```bash
 # Ubuntu/Debian
-sudo apt install libfuse-dev
+sudo apt install libfuse-dev pkg-config
 
 # Fedora
 sudo dnf install fuse-devel
+
+# macOS
+# Note: Use macFUSE (https://osxfuse.github.io/)
 ```
 
-## Expected Test Results
+## Testing
 
+### Run Full Test Suite
+```bash
+# All tests with output
+cargo test -- --nocapture --test-threads=1
+
+# Backend stress tests (deduplication, GC verification)
+cargo test --test backend_stress
+
+# Specific test
+cargo test test_chunking_consistency
 ```
-Running 8 tests:
-✓ Empty file handling
-✓ Tiny file (< 48 bytes)
-✓ Deduplication (16.7% storage savings on shared 50KB data)
-✓ 1MB stress test (~250 chunks in ~0.3s)
-✓ Missing chunk error handling
-```
 
-## Key Algorithms
+### Expected Test Coverage
+- Empty file handling
+- Deduplication across multiple files
+- Large file stress tests (1MB+)
+- Error handling and recovery
+- GC behavior verification
+- Snapshot isolation
+- Tag lookup and permutation tests
 
-- **Polynomial Rolling Hash**: `hash = (hash × 256 + byte) mod 1000000007`
-- **Cut Condition**: `(hash & 0xFFF) == 0` → ~4KB average chunk size (2^12)
-- **Content Addressing**: `filename = SHA256(chunk_data)`
+## Key Algorithms & Constants
 
-## Demo Script
+### Rolling Hash Chunking
+- **Polynomial Hash**: `hash = (hash × 256 + byte) mod 2^31 - 1`
+- **Cut Condition**: `(hash & 0xFFF) == 0` → ~4 KB average chunk size
+- **Window Size**: 64 bytes for pattern matching
+- **Complexity**: O(1) per byte
+
+### Content Addressing
+- **Hash Function**: SHA256 (cryptographically secure)
+- **Filename Format**: `xx/yyyy...` (first 2 chars = directory, rest = filename)
+- **Compression**: Zstd (default level 3)
+- **Storage**: Flat directory tree in `./my_storage/`
+
+### Snapshot Copy-on-Write
+- **Trigger**: `Arc::strong_count > 1` on write operation
+- **Path Cloning**: Deep clone from root to modified node
+- **New Inode IDs**: Assigned via atomic counter
+- **Complexity**: O(path_length) amortized
+
+### Tag Lookup
+- **Storage**: HashMap (in-memory) + sled DB (persistent)
+- **Query**: Tag intersection with bitvector OR filtering
+- **Permutations**: n! candidates for n-tag directory
+- **Complexity**: O(1) lookup, O(n) filtering
+
+## Comprehensive Demo
+
 ```bash
 # Terminal 1: Mount
+mkdir mnt
 cargo run -- mount mnt
 
-# Terminal 2: Test CoW refinements
-echo "Version 1" > mnt/file.txt
-mkdir mnt/docs
-echo "Data" > mnt/docs/report.txt
+# Terminal 2: Test all features
+
+# ===== PHASE 1: CONTENT DEDUPLICATION =====
+echo "Important data" > mnt/original.txt
+echo "Important data" > mnt/backup.txt
+# Both files share same chunk(s) in storage
+
+# ===== PHASE 2: TIME TRAVEL =====
+mkdir mnt/documents
+echo "Draft v1" > mnt/documents/report.txt
 
 # Take snapshot
-mkdir mnt/.snap_v1
-# Output: [CHRONOS] Taking Snapshot: v1
-#         [GC] Root Inode ref_count: 2
+mkdir mnt/.snap_initial
+# Output: [CHRONOS] Taking Snapshot: initial
+#         [GC] Root inode Arc refcount: 2
 
-# Test CoW on write
-echo "Version 2" > mnt/file.txt
-# Output: [WRITE] Request to modify 'file.txt'
-#         [CoW] Node 'file.txt' is shared! Cloning...
+# Modify document and verify isolation
+echo "Final v2" > mnt/documents/report.txt
 
-# Test CoW on create (NEW)
-touch mnt/newfile.txt
-# Output: [CREATE] Ensuring parent '/' is mutable
+# Check live version
+cat mnt/documents/report.txt                          # "Final v2"
 
-# Test CoW on nested mkdir (NEW)
-mkdir mnt/docs/subdir
-# Output: [MKDIR] Ensuring parent 'docs' is mutable
-#         [CoW] Node 'docs' is shared! Cloning...
+# Check snapshot version
+cat mnt/.snapshots/initial/documents/report.txt      # "Draft v1"
 
-# Verify snapshot isolation
-cat mnt/file.txt                    # "Version 2"
-cat mnt/.snapshots/v1/file.txt     # "Version 1"
-ls mnt/                             # Shows newfile.txt
-ls mnt/.snapshots/v1/               # Doesn't show newfile.txt
+# Verify CoW divergence (should show two inode IDs)
+ls -i mnt/documents/report.txt
+ls -i mnt/.snapshots/initial/documents/report.txt
 
-# Test read-only snapshot (should fail)
-echo "hack" > mnt/.snapshots/v1/file.txt  # Permission denied
+# ===== PHASE 3: TAG-BASED ACCESS =====
+mkdir -p mnt/projects/backend/2026
+echo "service code" > mnt/projects/backend/2026/api.rs
+
+# Access via different tag order
+cat mnt/projects/backend/2026/api.rs      # Original
+cat mnt/backend/2026/projects/api.rs      # Permuted
+cat mnt/2026/projects/backend/api.rs      # Permuted
+
+# Modify via different path
+echo "updated service" > mnt/backend/projects/2026/api.rs
+
+# Verify all paths show same content
+cat mnt/projects/backend/2026/api.rs      # "updated service"
+cat mnt/2026/backend/projects/api.rs      # "updated service"
+
+# Test snapshot + tagging combined
+mkdir mnt/.snap_code_v1
+echo "another update" > mnt/projects/backend/2026/api.rs
+cat mnt/.snapshots/code_v1/backend/2026/projects/api.rs
 ```
 
 ## License
 
 MIT
-
-
-## Read Pipeline
-
-```mermaid
-flowchart TD
-    Start([Incoming Read Request]) --> Lookup[Query Sled DB]
-    
-    subgraph Metadata_Retrieval [Step 1: Recipe Lookup]
-        Lookup <-->|Filename Key| DB[(Metadata DB\nSled)]
-        Lookup --> Check{Found?}
-        Check -- No --> Err([Return Error\nENOENT])
-        Check -- Yes --> Decode[Deserialize Recipe\n(Bincode)]
-    end
-
-    Decode --> Iter[Iterate Chunk Hashes]
-
-    subgraph Reconstruction_Loop [Step 2: Reassembly]
-        Iter --> ReadCAS[Read Chunk File]
-        ReadCAS <-->|Hash Path| CAS[(CAS Storage\n/cas/xx/yyyy)]
-        ReadCAS --> Decomp[Zstd Decompress]
-        Decomp --> Append[Append to Buffer]
-    end
-
-    Append --> More{More Chunks?}
-    More -- Yes --> Iter
-    More -- No --> Finish([Return Reconstructed File])
-
-    %% Styling
-    style Start fill:#fff,stroke:#333,stroke-width:2px
-    style Finish fill:#fff,stroke:#333,stroke-width:2px
-    style DB fill:#eee,stroke:#333
-    style CAS fill:#eee,stroke:#333

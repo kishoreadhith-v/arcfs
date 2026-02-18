@@ -24,6 +24,10 @@ use std::time::{ Duration, SystemTime };
 const TTL: Duration = Duration::from_secs(1);
 const FUSE_ROOT_ID: u64 = 1;
 const SNAPSHOT_DIR_ID: u64 = 2;
+const TAGFS_ROOT_ID: u64 = 3;
+
+// TagFS virtual inode ID range: 50000-99999
+const TAGFS_VNODE_START: u64 = 50000;
 
 // ===========================================================================
 // 1. DATA STRUCTURES
@@ -60,6 +64,15 @@ pub struct Snapshot {
     pub root: Arc<RwLock<Inode>>,
 }
 
+// TagFS Phase 3: Virtual directory context for tag-based paths
+#[derive(Debug, Clone)]
+pub struct VirtualDirContext {
+    pub path: String,                    // e.g., "/@tags/work/2026"
+    pub tags: Vec<String>,               // e.g., ["work", "2026"]
+    pub virtual_inode_id: u64,           // e.g., 50001
+    pub children: HashMap<String, u64>,  // Maps child name -> inode (real or virtual)
+}
+
 fn dir_attr(ino: u64) -> FileAttr {
     FileAttr {
         ino,
@@ -85,7 +98,12 @@ pub struct BetterFS {
     pub inode_registry: Arc<RwLock<HashMap<u64, Arc<RwLock<Inode>>>>>,
     pub root: Arc<RwLock<Inode>>,
     pub snapshots: Arc<RwLock<HashMap<String, Snapshot>>>,
+    pub virtual_dir_cache: Arc<RwLock<HashMap<u64, VirtualDirContext>>>, // TagFS: virtual inode → context
+    pub inode_to_tags: Arc<RwLock<HashMap<u64, Vec<String>>>>, // TagFS: real inode → tags (for mkdir dirs)
+    pub tag_index: Arc<RwLock<HashMap<String, Vec<u64>>>>, // TagFS: tag -> set of inode IDs
+    pub inode_tag_cache: Arc<RwLock<HashMap<u64, Vec<String>>>>, // TagFS: inode -> tags (denormalized)
     next_inode: AtomicU64,
+    next_vnode: AtomicU64, // Counter for virtual inode IDs
 }
 
 impl BetterFS {
@@ -99,7 +117,12 @@ impl BetterFS {
             inode_registry: registry,
             root,
             snapshots: Arc::new(RwLock::new(HashMap::new())),
+            virtual_dir_cache: Arc::new(RwLock::new(HashMap::new())), // TagFS: new cache
+            inode_to_tags: Arc::new(RwLock::new(HashMap::new())), // TagFS: new reverse map
+            tag_index: Arc::new(RwLock::new(HashMap::new())), // TagFS: tag lookup index
+            inode_tag_cache: Arc::new(RwLock::new(HashMap::new())), // TagFS: inode tag cache
             next_inode: AtomicU64::new(100),
+            next_vnode: AtomicU64::new(TAGFS_VNODE_START), // Start from 50000
         };
 
         fs.hydrate_tree();
@@ -128,6 +151,65 @@ impl BetterFS {
         self.next_inode.fetch_add(1, Ordering::Relaxed)
     }
 
+    // ===========================
+    // TAGFS Phase 3: Helpers
+    // ===========================
+
+    /// Check if a path is a TagFS path (starts with /@tags/)
+    fn is_tagfs_path(path: &str) -> bool {
+        path.starts_with("/@tags/") || path == "/@tags"
+    }
+
+    /// Extract tags from a TagFS path
+    /// Examples:
+    ///   "/@tags/work/2026" → ["work", "2026"]
+    ///   "/@tags/work" → ["work"]
+    fn extract_tags_from_path(path: &str) -> Vec<String> {
+        if !Self::is_tagfs_path(path) {
+            return Vec::new();
+        }
+
+        // Remove "/@tags/" prefix and split by '/'
+        let without_prefix = path.strip_prefix("/@tags/").unwrap_or("");
+        without_prefix
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    /// Generate or retrieve a virtual inode ID for a tag set
+    fn get_or_create_virtual_inode(&self, tags: &[String]) -> u64 {
+        // Check if we already have this path cached
+        let cache = self.virtual_dir_cache.read().unwrap();
+        for (vnode_id, context) in cache.iter() {
+            if context.tags == tags {
+                return *vnode_id;
+            }
+        }
+        drop(cache);
+
+        // Create new virtual inode
+        let vnode_id = self.next_vnode.fetch_add(1, Ordering::Relaxed);
+        let path = format!("/@tags/{}", tags.join("/"));
+        let context = VirtualDirContext {
+            path,
+            tags: tags.to_vec(),
+            virtual_inode_id: vnode_id,
+            children: HashMap::new(),
+        };
+
+        self.virtual_dir_cache.write().unwrap().insert(vnode_id, context);
+        println!("[TAGFS] Created virtual inode {} for tags: {:?}", vnode_id, tags);
+        vnode_id
+    }
+
+    /// Retrieve virtual directory context by inode ID
+    fn get_virtual_dir_context(&self, inode_id: u64) -> Option<VirtualDirContext> {
+        self.virtual_dir_cache.read().unwrap().get(&inode_id).cloned()
+    }
+
+
     fn hydrate_tree(&mut self) {
         println!("FUSE: Hydrating Inode Tree from Database...");
         let files = self.manager.list_files();
@@ -141,6 +223,38 @@ impl BetterFS {
                 self.add_node_to_tree(&path, size, ftype);
             }
         }
+        
+        // ===========================
+        // TAGFS Phase 3: Build Tag Index on Startup
+        // ===========================
+        println!("[TAGFS] Building tag index from sled database...");
+        
+        // Scan all inodes in the registry
+        let registry = self.inode_registry.read().unwrap();
+        for inode_id in registry.keys() {
+            // Try to load tags for this inode from manager
+            if let Ok(tags) = self.manager.get_file_tags(*inode_id) {
+                if !tags.is_empty() {
+                    println!("[TAGFS] Inode {}: tags = {:?}", inode_id, tags);
+                    
+                    // Store in inode_tag_cache
+                    self.inode_tag_cache.write().unwrap().insert(*inode_id, tags.clone());
+                    
+                    // Update tag_index (tag -> list of inodes)
+                    for tag in &tags {
+                        self.tag_index
+                            .write()
+                            .unwrap()
+                            .entry(tag.clone())
+                            .or_insert_with(Vec::new)
+                            .push(*inode_id);
+                    }
+                }
+            }
+        }
+        drop(registry);
+        
+        println!("[TAGFS] Tag index built with {} tags", self.tag_index.read().unwrap().len());
     }
 
     fn add_node_to_tree(&self, path: &str, size: u64, kind: FileType) {
@@ -282,6 +396,12 @@ impl BetterFS {
     }
 
     fn get_path_from_inode(&self, target_ino: u64) -> Option<String> {
+        // ===========================
+        // Live Filesystem Path (Original Logic)
+        // Files are stored in the live tree, NOT in canonical locations
+        // Tags are just metadata for enabling tag-based queries
+        // ===========================
+        
         if target_ino == FUSE_ROOT_ID {
             return Some(String::new());
         }
@@ -335,6 +455,61 @@ impl BetterFS {
         None
     }
 
+    // ===========================
+    // TAGFS Phase 3: Tag Index Queries
+    // ===========================
+    
+    /// Find all inodes matching a set of tags (intersection - all tags required)
+    fn find_inodes_by_tags(&self, tags: &[String]) -> Vec<u64> {
+        if tags.is_empty() {
+            return Vec::new();
+        }
+        
+        let tag_index = self.tag_index.read().unwrap();
+        
+        // Start with inodes matching the first tag
+        let first_tag_inodes = match tag_index.get(&tags[0]) {
+            Some(inodes) => inodes.clone(),
+            None => return Vec::new(),
+        };
+        
+        // Filter to only inodes matching ALL tags
+        let mut result = Vec::new();
+        for inode_id in first_tag_inodes {
+            if let Some(inode_tags) = self.inode_tag_cache.read().unwrap().get(&inode_id) {
+                // Check if this inode has all required tags
+                if tags.iter().all(|tag| inode_tags.contains(tag)) {
+                    result.push(inode_id);
+                }
+            }
+        }
+        
+        result
+    }
+    
+    /// Get all possible next tags given a set of current tags
+    fn find_next_level_tags(&self, current_tags: &[String]) -> Vec<String> {
+        let mut next_tags = std::collections::HashSet::new();
+        
+        // Find all inodes with current tags
+        let matching_inodes = self.find_inodes_by_tags(current_tags);
+        
+        // For each matching inode, get its tags and find those not in current_tags
+        for inode_id in matching_inodes {
+            if let Some(inode_tags) = self.inode_tag_cache.read().unwrap().get(&inode_id) {
+                for tag in inode_tags {
+                    if !current_tags.contains(tag) {
+                        next_tags.insert(tag.clone());
+                    }
+                }
+            }
+        }
+        
+        let mut tags_vec: Vec<_> = next_tags.into_iter().collect();
+        tags_vec.sort();
+        tags_vec
+    }
+
     fn find_in_snapshot_tree(
         &self,
         root: &Arc<RwLock<Inode>>,
@@ -363,6 +538,124 @@ impl Filesystem for BetterFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_str().unwrap();
 
+        // ===========================
+        // TAGFS Phase 3: Transparent Tag Lookup
+        // ===========================
+        
+        // Strategy: First try live tree, then try tag system
+        // No special /@tags/ prefix needed - transparent to user
+        
+        // Check if parent is a TagFS virtual directory
+        if let Some(context) = self.get_virtual_dir_context(parent) {
+            // We're inside a virtual tag directory
+            
+            // First: Check if child was created via mkdir in this virtual dir
+            if let Some(&child_inode_id) = context.children.get(name_str) {
+                if let Some(child_node) = self.inode_registry.read().unwrap().get(&child_inode_id) {
+                    let child_guard = child_node.read().unwrap();
+                    println!("[TAGFS] Found child in virtual dir context: {} -> inode {}", name_str, child_inode_id);
+                    let attr = child_guard.attr.clone();
+                    return reply.entry(&TTL, &attr, 0);
+                }
+            }
+            
+            // Second: Try to extend tags with the new component
+            let mut next_tags = context.tags.clone();
+            next_tags.push(name_str.to_string());
+            
+            println!("[TAGFS] In virtual dir {:?}, trying tag: {}", context.tags, name_str);
+            
+            // Query: Do files exist with all these tags?
+            match self.manager.get_files_by_tags(&next_tags) {
+                Ok(file_ids) if !file_ids.is_empty() => {
+                    // At least one file matches these tags
+                    let vnode_id = self.get_or_create_virtual_inode(&next_tags);
+                    println!("[TAGFS] ✓ Found virtual dir for tags {:?}, inode {}", next_tags, vnode_id);
+                    return reply.entry(&TTL, &dir_attr(vnode_id), 0);
+                }
+                Ok(_) => {
+                    // No files with these tags, but maybe it's a filename in the current tag dir?
+                    // Try querying files that match CURRENT tags and see if any have this filename
+                    if let Ok(file_ids) = self.manager.get_files_by_tags(&context.tags) {
+                        for file_id in file_ids {
+                            // Check if this file has the name we're looking for
+                            if let Some(tags_vec) = self.inode_tag_cache.read().unwrap().get(&file_id).cloned() {
+                                // Try to get filename from the live tree
+                                if let Some(node_arc) = self.inode_registry.read().unwrap().get(&file_id) {
+                                    let node = node_arc.read().unwrap();
+                                    // For now, just return it - we found a matching file
+                                    println!("[TAGFS] ✓ Found file in tag dir: {} (inode {})", name_str, file_id);
+                                    return reply.entry(&TTL, &node.attr, 0);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // None found, check if it's a valid next tag
+                    match self.manager.get_next_level_tags(&context.tags) {
+                        Ok(next_level) if next_level.contains(&name_str.to_string()) => {
+                            // This tag exists as a next-level option
+                            let vnode_id = self.get_or_create_virtual_inode(&next_tags);
+                            println!("[TAGFS] ✓ Valid next tag: {:?}, inode {}", next_tags, vnode_id);
+                            return reply.entry(&TTL, &dir_attr(vnode_id), 0);
+                        }
+                        _ => {
+                            println!("[TAGFS] ✗ Not a valid tag combination or file: {:?}", next_tags);
+                            return reply.error(ENOENT);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("[TAGFS] Tag query error: {}", e);
+                    return reply.error(ENOENT);
+                }
+            }
+        }
+
+        // ===========================
+        // TagFS: Root-level lookups prioritize tags over live tree
+        // ===========================
+        
+        if parent == FUSE_ROOT_ID {
+            println!("[TAGFS] Root lookup for '{}' - checking tags first...", name_str);
+            
+            // Check if this name exists as a tag (files have this tag)
+            match self.manager.get_files_with_tag(name_str) {
+                Ok(file_ids) if !file_ids.is_empty() => {
+                    let single_tag = vec![name_str.to_string()];
+                    let vnode_id = self.get_or_create_virtual_inode(&single_tag);
+                    println!("[TAGFS] ✓ Found tag directory for '{}', inode {}", name_str, vnode_id);
+                    return reply.entry(&TTL, &dir_attr(vnode_id), 0);
+                }
+                _ => {
+                    // No tag found - fall through to live tree check below
+                    println!("[TAGFS] No tag found for '{}', checking live tree...", name_str);
+                }
+            }
+        }
+
+        // ===========================
+        // Live Filesystem (Original Logic)
+        // ===========================
+        
+        // Check: Is it in the live tree?
+        {
+            let registry = self.inode_registry.read().unwrap();
+            if let Some(parent_node) = registry.get(&parent) {
+                let parent_guard = parent_node.read().unwrap();
+                if let Some(child_arc) = parent_guard.children.get(name_str) {
+                    let child_guard = child_arc.read().unwrap();
+                    println!("[FS] Live filesystem: found {}", name_str);
+                    let attr = child_guard.attr.clone();
+                    return reply.entry(&TTL, &attr, 0);
+                }
+            }
+        } // registry and parent_guard dropped here
+
+        // ===========================
+        // Snapshots (Existing)
+        // ===========================
+        
         if parent == FUSE_ROOT_ID && name_str == ".snapshots" {
             return reply.entry(&TTL, &dir_attr(SNAPSHOT_DIR_ID), 0);
         }
@@ -371,24 +664,21 @@ impl Filesystem for BetterFS {
             let snaps = self.snapshots.read().unwrap();
             if let Some(snap) = snaps.get(name_str) {
                 let mut root_attr = snap.root.read().unwrap().attr;
-                // Mark snapshot roots as read-only
-                root_attr.perm = 0o555; // r-xr-xr-x
+                root_attr.perm = 0o555;
                 return reply.entry(&TTL, &root_attr, 0);
             }
             return reply.error(ENOENT);
         }
 
         // Check if parent is inside a snapshot tree
-        // First, check if parent matches any snapshot root
         let snaps = self.snapshots.read().unwrap();
         for (_snap_name, snapshot) in snaps.iter() {
             let snap_root = snapshot.root.read().unwrap();
             if parent == snap_root.id {
-                // Looking up inside a snapshot root
                 if let Some(child_arc) = snap_root.children.get(name_str) {
                     let child_guard = child_arc.read().unwrap();
                     let mut child_attr = child_guard.attr;
-                    child_attr.perm = 0o555; // Read-only
+                    child_attr.perm = 0o555;
                     return reply.entry(&TTL, &child_attr, 0);
                 } else {
                     return reply.error(ENOENT);
@@ -396,13 +686,12 @@ impl Filesystem for BetterFS {
             }
             drop(snap_root);
 
-            // Recursively search snapshot tree
             if let Some(node_arc) = self.find_in_snapshot_tree(&snapshot.root, parent) {
                 let node = node_arc.read().unwrap();
                 if let Some(child_arc) = node.children.get(name_str) {
                     let child_guard = child_arc.read().unwrap();
                     let mut child_attr = child_guard.attr;
-                    child_attr.perm = 0o555; // Read-only
+                    child_attr.perm = 0o555;
                     return reply.entry(&TTL, &child_attr, 0);
                 }
                 return reply.error(ENOENT);
@@ -410,20 +699,8 @@ impl Filesystem for BetterFS {
         }
         drop(snaps);
 
-        // Not in snapshots, check live filesystem
-        let registry = self.inode_registry.read().unwrap();
-        if let Some(parent_node) = registry.get(&parent) {
-            let parent_guard = parent_node.read().unwrap();
-
-            if let Some(child_arc) = parent_guard.children.get(name_str) {
-                let child_guard = child_arc.read().unwrap();
-                reply.entry(&TTL, &child_guard.attr, 0);
-            } else {
-                reply.error(ENOENT);
-            }
-        } else {
-            reply.error(ENOENT);
-        }
+        // Default: not found
+        reply.error(ENOENT);
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
@@ -459,6 +736,54 @@ impl Filesystem for BetterFS {
         offset: i64,
         mut reply: ReplyDirectory
     ) {
+        // ===========================
+        // TAGFS Phase 3c: Readdir for Virtual Directories
+        // ===========================
+        
+        if let Some(context) = self.get_virtual_dir_context(ino) {
+            println!("[TAGFS] Readdir virtual dir with tags: {:?}", context.tags);
+            
+            if offset == 0 {
+                let _ = reply.add(ino, 0, FileType::Directory, ".");
+                let _ = reply.add(FUSE_ROOT_ID, 1, FileType::Directory, "..");
+                
+                let mut entry_offset = 2i64;
+                
+                // Get all files matching current tag set
+                if let Ok(file_ids) = self.manager.get_files_by_tags(&context.tags) {
+                    for file_id in file_ids {
+                        // We need to get the filename for this inode
+                        // For now, use inode ID as name (not ideal, will improve in 3d)
+                        if let Some(parent_node) = self.inode_registry.read().unwrap().get(&file_id) {
+                            let parent_guard = parent_node.read().unwrap();
+                            let filename = format!("file_{}", file_id);
+                            let _ = reply.add(file_id, entry_offset, FileType::RegularFile, &filename);
+                            entry_offset += 1;
+                            println!("[TAGFS]   → File: {} (inode {})", filename, file_id);
+                        }
+                    }
+                }
+                
+                // Get next-level tags as subdirectories
+                if let Ok(next_tags) = self.manager.get_next_level_tags(&context.tags) {
+                    for tag in next_tags {
+                        let mut tag_path = context.tags.clone();
+                        tag_path.push(tag.clone());
+                        let vnode_id = self.get_or_create_virtual_inode(&tag_path);
+                        let _ = reply.add(vnode_id, entry_offset, FileType::Directory, &tag);
+                        entry_offset += 1;
+                        println!("[TAGFS]   → Tag: {} (inode {})", tag, vnode_id);
+                    }
+                }
+            }
+            reply.ok();
+            return;
+        }
+
+        // ===========================
+        // Snapshots (Existing)
+        // ===========================
+        
         if ino == SNAPSHOT_DIR_ID {
             if offset == 0 {
                 let _ = reply.add(SNAPSHOT_DIR_ID, 0, FileType::Directory, ".");
@@ -606,6 +931,58 @@ impl Filesystem for BetterFS {
 
         println!("[WRITE] Request to modify '{}'", path);
 
+        // ===========================
+        // TAGFS Phase 3d: Auto-tagging on Write
+        // ===========================
+        
+        // ===========================
+        // Handle Canonical Tagged File Paths
+        // ===========================
+        
+        if path.starts_with("/_tagged_files/") {
+            // This is a canonical path for a tagged file
+            // Skip CoW logic and directly write
+            println!("[TAGFS] Writing to canonical tagged file path: {}", path);
+            
+            let mut file_data = self.manager.read_file(&path).unwrap_or_default();
+            
+            let end = (offset as usize) + data.len();
+            if end > file_data.len() {
+                file_data.resize(end, 0);
+            }
+            file_data[offset as usize..end].copy_from_slice(data);
+            
+            if self.manager.write_file(&path, &file_data).is_err() {
+                return reply.error(libc::EIO);
+            }
+            
+            // Update inode size
+            if let Some(inode_id) = path.strip_prefix("/_tagged_files/").and_then(|s| s.parse::<u64>().ok()) {
+                if let Some(inode_arc) = self.inode_registry.read().unwrap().get(&inode_id) {
+                    let mut inode = inode_arc.write().unwrap();
+                    inode.attr.size = file_data.len() as u64;
+                    inode.attr.blocks = (file_data.len() as u64).div_ceil(512);
+                    inode.attr.mtime = SystemTime::now();
+                }
+            }
+            
+            return reply.written(data.len() as u32);
+        }
+        
+        // ===========================
+        // Live Filesystem Write (Original Logic with CoW)
+        // ===========================
+        
+        // Check if the file being written is in a virtual tag directory
+        // (by checking if its parent is a virtual inode)
+        let parent_is_virtual = self.get_virtual_dir_context(self.inode_registry
+            .read()
+            .unwrap()
+            .values()
+            .next()
+            .map(|_| 0u64)
+            .unwrap_or(0)).is_some(); // Simplified check
+        
         match self.get_mutable_inode(&path) {
             Ok(inode_arc) => {
                 let mut file_data = self.manager.read_file(&path).unwrap_or_default();
@@ -625,6 +1002,10 @@ impl Filesystem for BetterFS {
                 inode.attr.size = file_data.len() as u64;
                 inode.attr.blocks = (file_data.len() as u64).div_ceil(512);
                 inode.attr.mtime = SystemTime::now();
+                
+                // AUTO-TAG: If we know the tags for this inode, store them
+                // (This will be improved when we track the parent context better)
+                
                 drop(inode);
 
                 reply.written(data.len() as u32);
@@ -644,6 +1025,28 @@ impl Filesystem for BetterFS {
         reply: ReplyCreate
     ) {
         let name_str = name.to_str().unwrap();
+        println!("[CREATE] Creating '{}' in parent inode {}", name_str, parent);
+
+        // ===========================
+        // TAGFS: Auto-tag files based on parent directory path
+        // ===========================
+        
+        // Get all parent directories from root to this parent
+        // This will become the file's tags
+        let tags_for_this_file: Vec<String> = if let Some(parent_path) = self.get_path_from_inode(parent) {
+            // Extract directory names from the path as tags
+            parent_path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        
+        if !tags_for_this_file.is_empty() {
+            println!("[TAGFS] Auto-tagging file '{}' with tags: {:?}", name_str, tags_for_this_file);
+        }
 
         // [CoW] Trigger CoW on parent path before modification
         if let Some(parent_path) = self.get_path_from_inode(parent) {
@@ -664,14 +1067,37 @@ impl Filesystem for BetterFS {
         };
         drop(registry);
 
-        let mut parent_guard = parent_node.write().unwrap();
-
         let new_id = self.generate_id();
         let new_inode = Inode::new(new_id, FileType::RegularFile);
         let new_arc = Arc::new(RwLock::new(new_inode));
 
         self.inode_registry.write().unwrap().insert(new_id, new_arc.clone());
+        
+        let mut parent_guard = parent_node.write().unwrap();
         parent_guard.children.insert(name_str.to_string(), new_arc.clone());
+        drop(parent_guard);
+
+        // Store tags for this file if it has tags
+        if !tags_for_this_file.is_empty() {
+            if let Err(e) = self.manager.set_file_tags(new_id, name_str, tags_for_this_file.clone()) {
+                println!("[TAGFS] Warning: Failed to tag file: {}", e);
+            } else {
+                println!("[TAGFS] Stored tags for inode {}: {:?}", new_id, tags_for_this_file);
+                
+                // Update in-memory caches
+                self.inode_tag_cache.write().unwrap().insert(new_id, tags_for_this_file.clone());
+                
+                // Update tag_index  
+                for tag in &tags_for_this_file {
+                    self.tag_index
+                        .write()
+                        .unwrap()
+                        .entry(tag.clone())
+                        .or_insert_with(Vec::new)
+                        .push(new_id);
+                }
+            }
+        }
 
         let attr = new_arc.read().unwrap().attr;
         reply.created(&TTL, &attr, 0, 0, 0);
@@ -767,12 +1193,10 @@ impl Filesystem for BetterFS {
             println!("[CHRONOS] Taking Snapshot: {}", snap_name);
 
             // Deep clone the root node to freeze its state
-            // This creates a NEW root with its own children HashMap
             let live_root = self.root.read().unwrap();
-            let mut frozen_root_node = live_root.clone(); // Deep clone the Inode struct
+            let mut frozen_root_node = live_root.clone();
             drop(live_root);
 
-            // Assign unique ID for FUSE
             let snap_root_id = self.generate_id();
             frozen_root_node.id = snap_root_id;
             frozen_root_node.attr.ino = snap_root_id;
@@ -791,7 +1215,6 @@ impl Filesystem for BetterFS {
                 root: frozen_root,
             });
 
-            // Persist snapshot metadata to disk
             let unix_timestamp = timestamp
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -804,16 +1227,7 @@ impl Filesystem for BetterFS {
             return reply.entry(&TTL, &dir_attr(9999), 0);
         }
 
-        // [CoW] Trigger CoW on parent path before modification
-        if let Some(parent_path) = self.get_path_from_inode(parent) {
-            println!("[MKDIR] Ensuring parent '{}' is mutable", if parent_path.is_empty() {
-                "/"
-            } else {
-                &parent_path
-            });
-            let _ = self.get_mutable_inode(&parent_path);
-        }
-
+        // Standard mkdir - just create a regular directory
         let registry = self.inode_registry.read().unwrap();
         let parent_node = match registry.get(&parent) {
             Some(node) => node.clone(),

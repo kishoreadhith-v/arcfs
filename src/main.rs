@@ -117,7 +117,8 @@ fn main() {
             println!("Starting FUSE session...");
 
             // Use spawn_mount for background operation (better for fuse-t)
-            let _handle = match fuser::spawn_mount2(fs_impl, mount_point.as_ref(), &options) {
+            let mount_path = std::path::Path::new(&mount_point);
+            let _handle = match fuser::spawn_mount2(fs_impl, mount_path, &options) {
                 Ok(handle) => {
                     println!("Filesystem mounted successfully!");
                     println!("Mount point: {}", mount_point);

@@ -27,6 +27,14 @@ pub struct DirEntry {
     // For now, we will store the 'full path' or a reference to make lookup easy.
 }
 
+// TagFS Phase 3: File tag metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileTagSet {
+    pub file_id: u64,           // Inode ID
+    pub filename: String,       // For reference
+    pub tags: Vec<String>,      // e.g., ["work", "2026", "projects"]
+}
+
 pub struct FileManager {
     storage: Storage,
     db: sled::Db,
@@ -309,6 +317,108 @@ impl FileManager {
         };
         let encoded: Vec<u8> = bincode::serialize(&recipe).map_err(|e| e.to_string())?;
         self.db.insert(path, encoded).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // =======================================================================
+    // TAGFS PHASE 3: Tag Management
+    // =======================================================================
+
+    /// Store tags for a file (inode_id)
+    pub fn set_file_tags(&self, inode_id: u64, filename: &str, tags: Vec<String>) -> Result<(), String> {
+        let tag_set = FileTagSet {
+            file_id: inode_id,
+            filename: filename.to_string(),
+            tags: tags.clone(),
+        };
+
+        let key = format!("file_tags:{}", inode_id);
+        let encoded = bincode::serialize(&tag_set).map_err(|e| format!("Serialization error: {}", e))?;
+
+        self.db.insert(key.as_bytes(), encoded).map_err(|e| format!("Database error: {}", e))?;
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+
+        println!("[TAGFS] Set tags for inode {}: {:?}", inode_id, tags);
+        Ok(())
+    }
+
+    /// Retrieve tags for a file (inode_id)
+    pub fn get_file_tags(&self, inode_id: u64) -> Result<Vec<String>, String> {
+        let key = format!("file_tags:{}", inode_id);
+        match self.db.get(key.as_bytes()) {
+            Ok(Some(bytes)) => {
+                let tag_set: FileTagSet = bincode::deserialize(&bytes)
+                    .map_err(|e| format!("Deserialization error: {}", e))?;
+                Ok(tag_set.tags)
+            }
+            Ok(None) => Ok(Vec::new()), // No tags set yet
+            Err(e) => Err(format!("Database error: {}", e)),
+        }
+    }
+
+    /// Get all files with a specific tag
+    pub fn get_files_with_tag(&self, tag: &str) -> Result<Vec<u64>, String> {
+        let mut result = Vec::new();
+        let prefix = b"file_tags:";
+
+        for item in self.db.scan_prefix(prefix).flatten() {
+            if let Ok(tag_set) = bincode::deserialize::<FileTagSet>(&item.1) {
+                if tag_set.tags.contains(&tag.to_string()) {
+                    result.push(tag_set.file_id);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Get all inode IDs that have ALL tags in the provided set (intersection)
+    pub fn get_files_by_tags(&self, tags: &[String]) -> Result<Vec<u64>, String> {
+        if tags.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Start with files that have the first tag
+        let mut candidates = self.get_files_with_tag(&tags[0])?;
+
+        // Filter by remaining tags (intersection)
+        for tag in &tags[1..] {
+            let files_with_tag = self.get_files_with_tag(tag)?;
+            candidates.retain(|ino| files_with_tag.contains(ino));
+        }
+
+        println!("[TAGFS] Query for tags {:?} returned {} files", tags, candidates.len());
+        Ok(candidates)
+    }
+
+    /// Get the next-level tags that can extend the current tag set
+    pub fn get_next_level_tags(&self, current_tags: &[String]) -> Result<Vec<String>, String> {
+        let file_ids = self.get_files_by_tags(current_tags)?;
+
+        let mut next_tags: HashSet<String> = HashSet::new();
+        let current_set: HashSet<String> = current_tags.iter().cloned().collect();
+
+        for file_id in file_ids {
+            if let Ok(all_tags) = self.get_file_tags(file_id) {
+                for tag in all_tags {
+                    if !current_set.contains(&tag) {
+                        next_tags.insert(tag);
+                    }
+                }
+            }
+        }
+
+        let mut result: Vec<String> = next_tags.into_iter().collect();
+        result.sort();
+        Ok(result)
+    }
+
+    /// Delete/unset tags for a file
+    pub fn delete_file_tags(&self, inode_id: u64) -> Result<(), String> {
+        let key = format!("file_tags:{}", inode_id);
+        self.db.remove(key.as_bytes()).map_err(|e| format!("Database error: {}", e))?;
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        println!("[TAGFS] Deleted tags for inode {}", inode_id);
         Ok(())
     }
 }
