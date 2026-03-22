@@ -4,7 +4,6 @@ mod file_manager;
 mod fuse_handler;
 mod storage;
 
-use crate::file_manager::FileRecipe;
 use clap::{ Parser, Subcommand };
 use file_manager::FileManager;
 use std::fs;
@@ -46,13 +45,13 @@ enum Commands {
 }
 
 fn main() {
+    env_logger::init();
     let args = Cli::parse();
 
     // Initialize the engine in a folder named "my_storage"
     // This creates a permanent database on your disk.
     let storage_path = "./my_storage";
     let manager = FileManager::new(storage_path);
-    let db_path = format!("{}/metadata_db", storage_path);
 
     match args.command {
         Commands::Write { file_path } => {
@@ -105,6 +104,7 @@ fn main() {
             // Start the FUSE Driver
             let options = vec![
                 fuser::MountOption::RW, // Read-Only
+                fuser::MountOption::AllowOther,
                 fuser::MountOption::FSName("betterfs".to_string()),
                 fuser::MountOption::AutoUnmount // Helps clean up on exit
             ];
@@ -115,31 +115,21 @@ fn main() {
         }
         Commands::Inspect => {
             println!("--- INSPECTING DATABASE ---");
-            // Open the DB directly for reading
-            let db = sled::open(&db_path).expect("Failed to open DB");
-
-            for (key, value) in db.iter().flatten() {
-                let key_str = String::from_utf8_lossy(&key);
-
-                // Try to decode as a FileRecipe
-                match bincode::deserialize::<FileRecipe>(&value) {
-                    Ok(recipe) => {
-                        let kind_str = match recipe.kind {
-                            file_manager::FileKind::Directory => "DIR",
-                            file_manager::FileKind::File => "FILE",
-                        };
-                        println!(
-                            "[{}] {} \t(Size: {} bytes, Chunks: {})",
-                            kind_str,
-                            key_str,
-                            recipe.file_size,
-                            recipe.chunks.len()
-                        );
-                    }
-                    Err(_) => {
-                        // If it fails, it might be raw data or something else
-                        println!("[???] {} \t(Raw Data)", key_str);
-                    }
+            for (key, parsed_recipe) in manager.inspect_records() {
+                if let Some(recipe) = parsed_recipe {
+                    let kind_str = match recipe.kind {
+                        file_manager::FileKind::Directory => "DIR",
+                        file_manager::FileKind::File => "FILE",
+                    };
+                    println!(
+                        "[{}] {} \t(Size: {} bytes, Chunks: {})",
+                        kind_str,
+                        key,
+                        recipe.file_size,
+                        recipe.chunks.len()
+                    );
+                } else {
+                    println!("[???] {} \t(Raw Data)", key);
                 }
             }
             println!("---------------------------");

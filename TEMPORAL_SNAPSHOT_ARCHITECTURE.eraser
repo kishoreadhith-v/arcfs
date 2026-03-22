@@ -1,0 +1,58 @@
+// Temporal Snapshot System (TSS) - Technical Architecture
+// ArcFS Copy-on-Write Implementation
+
+title Temporal Snapshot System Architecture
+
+// Core Data Structures
+Memory Layer [color: blue, icon: database] {
+  Inode Tree [icon: tree, label: "Inode Tree\nArc<RwLock<Inode>>"]
+  Inode Registry [icon: server, label: "Global Registry\nHashMap<u64, Arc>"]
+  Snapshot Registry [icon: archive, label: "Snapshot Store\nHashMap<Name, Root>"]
+}
+
+// Synchronization & Threading
+Concurrency Layer [color: purple, icon: shield] {
+  RwLock Guard [icon: lock, label: "RwLock<Inode>\nMulti-reader\nSingle-writer"]
+  Arc Counting [icon: git-branch, label: "Reference Counting\nstrong_count tracker"]
+}
+
+// Copy-on-Write Engine
+CoW Engine [color: orange, icon: cpu] {
+  Reference Checker [icon: search, label: "Check strong_count"]
+  Path Cloner [icon: copy, label: "Deep Clone\nID Reassignment"]
+  Divergence Handler [icon: git-fork, label: "Split Live/Snapshot"]
+}
+
+// Storage Backend
+Persistence [color: gray, icon: hard-drive] {
+  Sled DB [icon: database, label: "Metadata Store"]
+  CAS Store [icon: archive, label: "Content-Addressable\nChunk Storage"]
+}
+
+// Garbage Collection
+GC System [color: red, icon: trash] {
+  Drop Handler [icon: x-circle, label: "Arc Drop Detection"]
+  Cascade Cleanup [icon: layers, label: "Recursive Dealloc"]
+}
+
+// Connections - Snapshot Creation
+Inode Tree > Snapshot Registry: Arc::clone(&root) O(1)
+Arc Counting > Snapshot Registry: Increment ref_count
+
+// Connections - Write Path
+Inode Tree > Reference Checker: Write request
+Reference Checker > Path Cloner: IF strong_count > 1
+Path Cloner > Divergence Handler: Clone shared path
+Divergence Handler > Inode Tree: Update live tree
+RwLock Guard > Inode Tree: Protects all mutations
+
+// Connections - Persistence
+Inode Tree > Sled DB: Persist metadata
+Snapshot Registry > Sled DB: Save snapshot index
+Inode Tree > CAS Store: Write file chunks
+
+// Connections - Garbage Collection
+Inode Tree > Drop Handler: unlink() / delete
+Snapshot Registry > Drop Handler: Remove snapshot
+Drop Handler > Cascade Cleanup: IF strong_count == 0
+Cascade Cleanup > CAS Store: Delete orphaned chunks

@@ -1,0 +1,77 @@
+# ArcFS Temporal Snapshot System - Manual Demo Commands
+# Copy and paste these commands one by one to demonstrate the system
+
+# ============================================
+# SETUP
+# ============================================
+fusermount -u mnt 2>/dev/null || true
+rm -rf my_storage
+cargo build --release
+target/release/better-fs mount mnt &
+sleep 2
+
+# ============================================
+# DEMO: Create Version 1
+# ============================================
+echo "Version 1 content" > mnt/doc.txt
+echo "Original team: Alice, Bob" > mnt/team.txt
+cat mnt/doc.txt
+
+# ============================================
+# DEMO: Snapshot v1
+# ============================================
+mkdir mnt/.snap_v1
+sleep 1
+ls mnt/.snapshots/
+
+# ============================================
+# DEMO: Create Version 2
+# ============================================
+echo "Version 2 content - UPDATED" > mnt/doc.txt
+echo "Expanded team: Alice, Bob, Charlie" > mnt/team.txt
+rm mnt/team.txt
+echo "New file in v2" > mnt/newfile.txt
+
+# ============================================
+# DEMO: Snapshot v2
+# ============================================
+mkdir mnt/.snap_v2
+sleep 1
+
+# ============================================
+# DEMO: Create Version 3
+# ============================================
+echo "Version 3 content - MAJOR CHANGES" > mnt/doc.txt
+echo "Another new file" > mnt/another.txt
+
+# ============================================
+# THE MAGIC - Compare all versions!
+# ============================================
+echo "=== CURRENT (v3) ==="
+cat mnt/doc.txt
+ls mnt/
+
+echo "=== SNAPSHOT v2 ==="
+cat mnt/.snapshots/v2/doc.txt
+ls mnt/.snapshots/v2/
+
+echo "=== SNAPSHOT v1 ==="
+cat mnt/.snapshots/v1/doc.txt
+ls mnt/.snapshots/v1/
+
+# ============================================
+# Show team.txt exists in v1 but deleted in current
+# ============================================
+echo "=== team.txt comparison ==="
+cat mnt/.snapshots/v1/team.txt    # EXISTS in v1
+cat mnt/team.txt 2>&1              # DELETED in current
+
+# ============================================
+# List all snapshots
+# ============================================
+ls -la mnt/.snapshots/
+
+# ============================================
+# CLEANUP
+# ============================================
+fusermount -u mnt

@@ -1,0 +1,27 @@
+name: BetterFS E2E FUSE (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fuse-regression:
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Execute FUSE regression suite
+        id: fuse_e2e
+        run: ./tests/regression_e2e.sh
+
+      - name: Summary - fuse e2e
+        if: always()
+        run: |
+          {
+            echo "## BetterFS Manual FUSE Summary"
+            echo "- Suite: regression_e2e"
+            echo "- Status: ${{ steps.fuse_e2e.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"

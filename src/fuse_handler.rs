@@ -14,8 +14,8 @@ use fuser::{
     ReplyWrite,
     Request,
 };
-use libc::ENOENT;
-use std::collections::HashMap;
+use libc::{EEXIST, EINVAL, ENOENT, EROFS};
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::sync::atomic::{ AtomicU64, Ordering };
 use std::sync::{ Arc, RwLock };
@@ -24,6 +24,7 @@ use std::time::{ Duration, SystemTime };
 const TTL: Duration = Duration::from_secs(1);
 const FUSE_ROOT_ID: u64 = 1;
 const SNAPSHOT_DIR_ID: u64 = 2;
+const SNAPSHOT_CREATE_ID: u64 = 3;
 
 // ===========================================================================
 // 1. DATA STRUCTURES
@@ -32,6 +33,8 @@ const SNAPSHOT_DIR_ID: u64 = 2;
 #[derive(Clone)]
 pub struct Inode {
     pub id: u64,
+    pub parent_id: u64,
+    pub name: String,
     pub children: HashMap<String, Arc<RwLock<Inode>>>,
     pub attr: FileAttr,
     #[allow(dead_code)]
@@ -44,6 +47,8 @@ impl Inode {
         attr.kind = kind;
         Inode {
             id,
+            parent_id: 0,
+            name: String::new(),
             children: HashMap::new(),
             attr,
             recipe: None,
@@ -80,11 +85,21 @@ fn dir_attr(ino: u64) -> FileAttr {
     }
 }
 
+fn snapshot_create_attr() -> FileAttr {
+    let mut attr = dir_attr(SNAPSHOT_CREATE_ID);
+    attr.kind = FileType::RegularFile;
+    attr.perm = 0o644;
+    attr.nlink = 1;
+    attr.size = 0;
+    attr
+}
+
 pub struct BetterFS {
     pub manager: FileManager,
     pub inode_registry: Arc<RwLock<HashMap<u64, Arc<RwLock<Inode>>>>>,
     pub root: Arc<RwLock<Inode>>,
     pub snapshots: Arc<RwLock<HashMap<String, Snapshot>>>,
+    pub page_cache: Arc<RwLock<HashMap<u64, (Vec<u8>, bool)>>>,
     next_inode: AtomicU64,
 }
 
@@ -99,8 +114,14 @@ impl BetterFS {
             inode_registry: registry,
             root,
             snapshots: Arc::new(RwLock::new(HashMap::new())),
+            page_cache: Arc::new(RwLock::new(HashMap::new())),
             next_inode: AtomicU64::new(100),
         };
+
+        {
+            let root_guard = fs.root.read().unwrap();
+            let _ = fs.manager.save_inode(&root_guard);
+        }
 
         fs.hydrate_tree();
         fs.restore_snapshots();
@@ -112,12 +133,36 @@ impl BetterFS {
         let snapshot_metadata = self.manager.load_snapshots();
 
         for meta in snapshot_metadata {
-            // Note: We're reusing the current root as a placeholder
-            // In production, we'd need to save/restore the actual tree state
+            let mut visited = HashSet::new();
+            let root = match self.restore_snapshot_subtree(meta.root_id, &mut visited) {
+                Ok(root) => root,
+                Err(e) => {
+                    eprintln!(
+                        "[CHRONOS] Failed restoring snapshot '{}' (root {}): {}",
+                        meta.name,
+                        meta.root_id,
+                        e
+                    );
+                    if let Err(delete_err) = self.manager.delete_snapshot(&meta.name) {
+                        eprintln!(
+                            "[CHRONOS] Failed pruning stale snapshot metadata '{}': {}",
+                            meta.name,
+                            delete_err
+                        );
+                    } else {
+                        eprintln!(
+                            "[CHRONOS] Pruned stale snapshot metadata '{}'",
+                            meta.name
+                        );
+                    }
+                    continue;
+                }
+            };
+
             let snapshot = Snapshot {
                 name: meta.name.clone(),
                 timestamp: std::time::UNIX_EPOCH + std::time::Duration::from_secs(meta.timestamp),
-                root: self.root.clone(), // Simplified: using current root
+                root,
             };
 
             self.snapshots.write().unwrap().insert(meta.name, snapshot);
@@ -129,156 +174,412 @@ impl BetterFS {
     }
 
     fn hydrate_tree(&mut self) {
-        println!("FUSE: Hydrating Inode Tree from Database...");
-        let files = self.manager.list_files();
-
-        for path in files {
-            if let Some((size, kind)) = self.manager.get_file_metadata(&path) {
-                let ftype = match kind {
-                    FileKind::File => FileType::RegularFile,
-                    FileKind::Directory => FileType::Directory,
-                };
-                self.add_node_to_tree(&path, size, ftype);
-            }
-        }
+        println!("[BOOT] Reconstructing BetterFS Inode Tree...");
+        self.hydrate_live_children(self.root.clone(), FUSE_ROOT_ID);
     }
 
-    fn add_node_to_tree(&self, path: &str, size: u64, kind: FileType) {
-        let mut current = self.root.clone();
-        let parts: Vec<&str> = path.split('/').collect();
-
-        for (i, part) in parts.iter().enumerate() {
-            if part.is_empty() {
-                continue;
+    fn hydrate_live_children(&self, parent_arc: Arc<RwLock<Inode>>, parent_id: u64) {
+        let dirents = match self.manager.list_dirents(parent_id) {
+            Ok(entries) => entries,
+            Err(e) => {
+                eprintln!("[BOOT] Failed loading dirents for {}: {}", parent_id, e);
+                return;
             }
-            let is_last = i == parts.len() - 1;
+        };
 
-            let mut node = current.write().unwrap();
-
-            if !node.children.contains_key(*part) {
-                let id = self.generate_id();
-                let mut child_inode = Inode::new(id, if is_last {
-                    kind
-                } else {
-                    FileType::Directory
-                });
-
-                if is_last {
-                    child_inode.attr.size = size;
-                    child_inode.attr.blocks = size.div_ceil(512);
+        for dirent in dirents {
+            let inode_meta = match self.manager.load_inode(dirent.child_inode_id) {
+                Ok(Some(meta)) => meta,
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!("[BOOT] Failed loading inode {}: {}", dirent.child_inode_id, e);
+                    continue;
                 }
+            };
 
-                let child_arc = Arc::new(RwLock::new(child_inode));
-                self.inode_registry.write().unwrap().insert(id, child_arc.clone());
-                node.children.insert(part.to_string(), child_arc);
+            let kind = if inode_meta.is_dir {
+                FileType::Directory
+            } else {
+                FileType::RegularFile
+            };
+
+            let mut child_inode = Inode::new(inode_meta.id, kind);
+            child_inode.parent_id = inode_meta.parent_id;
+            child_inode.name = inode_meta.name.clone();
+            child_inode.attr.size = inode_meta.attr.size;
+            child_inode.attr.blocks = inode_meta.attr.size.div_ceil(512);
+
+            let child_arc = Arc::new(RwLock::new(child_inode));
+            self.inode_registry
+                .write()
+                .unwrap()
+                .insert(inode_meta.id, child_arc.clone());
+
+            parent_arc
+                .write()
+                .unwrap()
+                .children
+                .insert(dirent.name, child_arc.clone());
+
+            let current_max = self.next_inode.load(Ordering::SeqCst);
+            if inode_meta.id >= current_max {
+                self.next_inode.store(inode_meta.id + 1, Ordering::SeqCst);
             }
 
-            let next = node.children.get(*part).unwrap().clone();
-            drop(node);
-            current = next;
+            if inode_meta.is_dir {
+                self.hydrate_live_children(child_arc, inode_meta.id);
+            }
         }
     }
 
-    fn get_mutable_inode(&self, path: &str) -> Result<Arc<RwLock<Inode>>, i32> {
+    fn restore_snapshot_subtree(
+        &self,
+        inode_id: u64,
+        visited: &mut HashSet<u64>,
+    ) -> Result<Arc<RwLock<Inode>>, String> {
+        if !visited.insert(inode_id) {
+            return Err(format!("Cycle detected while restoring inode {}", inode_id));
+        }
+
+        let inode_meta = self
+            .manager
+            .load_inode(inode_id)?
+            .ok_or_else(|| format!("Missing inode metadata for {}", inode_id))?;
+
+        let kind = if inode_meta.is_dir {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        };
+
+        let mut inode = Inode::new(inode_meta.id, kind);
+        inode.parent_id = inode_meta.parent_id;
+        inode.name = inode_meta.name.clone();
+        inode.attr.size = inode_meta.attr.size;
+        inode.attr.blocks = inode_meta.attr.size.div_ceil(512);
+
+        let node_arc = Arc::new(RwLock::new(inode));
+        let children = self.manager.list_dirents(inode_id)?;
+
+        for child in children {
+            let child_arc = self.restore_snapshot_subtree(child.child_inode_id, visited)?;
+            node_arc
+                .write()
+                .unwrap()
+                .children
+                .insert(child.name, child_arc);
+        }
+
+        Ok(node_arc)
+    }
+
+    fn clone_subtree_from_metadata(
+        &self,
+        source_inode_id: u64,
+        parent_id: u64,
+        node_name: &str,
+        register_live: bool,
+    ) -> Result<Arc<RwLock<Inode>>, String> {
+        let source_meta = self
+            .manager
+            .load_inode(source_inode_id)?
+            .ok_or_else(|| format!("Missing source inode metadata {}", source_inode_id))?;
+
+        let source_kind = if source_meta.is_dir {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        };
+
+        let new_id = self.generate_id();
+        let mut new_inode = Inode::new(new_id, source_kind);
+        new_inode.parent_id = parent_id;
+        new_inode.name = node_name.to_string();
+        new_inode.attr.size = source_meta.attr.size;
+        new_inode.attr.blocks = source_meta.attr.size.div_ceil(512);
+
+        self.manager.save_inode(&new_inode)?;
+        self.manager.save_dirent(parent_id, node_name, new_id)?;
+
+        if source_kind == FileType::RegularFile {
+            let recipe = self
+                .manager
+                .load_recipe(source_inode_id)?
+                .unwrap_or(FileRecipe {
+                file_size: 0,
+                chunks: Vec::new(),
+                kind: FileKind::File,
+            });
+            self.manager.save_recipe(new_id, &recipe)?;
+        }
+
+        let new_arc = Arc::new(RwLock::new(new_inode));
+
+        if register_live {
+            self.inode_registry
+                .write()
+                .unwrap()
+                .insert(new_id, new_arc.clone());
+        }
+
+        let children = self.manager.list_dirents(source_inode_id)?;
+        for child in children {
+            let cloned_child = self.clone_subtree_from_metadata(
+                child.child_inode_id,
+                new_id,
+                &child.name,
+                register_live,
+            )?;
+            new_arc
+                .write()
+                .unwrap()
+                .children
+                .insert(child.name, cloned_child);
+        }
+
+        Ok(new_arc)
+    }
+
+    fn create_snapshot_named(&self, snap_name: &str) -> Result<(), String> {
+        if self.snapshots.read().unwrap().contains_key(snap_name) {
+            return Err(format!("Snapshot '{}' already exists", snap_name));
+        }
+
+        self.flush_all_dirty_cache()?;
+
+        let frozen_root = self.clone_subtree_from_metadata(FUSE_ROOT_ID, SNAPSHOT_DIR_ID, snap_name, false)?;
+
+        let timestamp = SystemTime::now();
+        let root_id = frozen_root.read().unwrap().id;
+        self.snapshots.write().unwrap().insert(
+            snap_name.to_string(),
+            Snapshot {
+                name: snap_name.to_string(),
+                timestamp,
+                root: frozen_root,
+            },
+        );
+
+        let unix_timestamp = timestamp
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.manager.save_snapshot(snap_name, unix_timestamp, root_id)?;
+
+        Ok(())
+    }
+
+    fn restore_live_from_snapshot(&self, snap_name: &str) -> Result<(), String> {
+        let snapshot_root_id = {
+            let snaps = self.snapshots.read().unwrap();
+            let snapshot = snaps
+                .get(snap_name)
+                .ok_or_else(|| format!("Snapshot '{}' not found", snap_name))?;
+            snapshot.root.read().unwrap().id
+        };
+
+        let old_root_dirents = self.manager.list_dirents(FUSE_ROOT_ID)?;
+        for dirent in old_root_dirents {
+            let _ = self.manager.delete_dirent(FUSE_ROOT_ID, &dirent.name);
+        }
+
+        {
+            let mut root = self.root.write().unwrap();
+            root.children.clear();
+            root.id = FUSE_ROOT_ID;
+            root.attr.ino = FUSE_ROOT_ID;
+            root.name = String::new();
+            root.parent_id = 0;
+            root.attr.kind = FileType::Directory;
+            root.attr.size = 0;
+            root.attr.blocks = 0;
+        }
+
+        {
+            let mut registry = self.inode_registry.write().unwrap();
+            registry.clear();
+            registry.insert(FUSE_ROOT_ID, self.root.clone());
+        }
+
+        self.page_cache.write().unwrap().clear();
+
+        {
+            let root_guard = self.root.read().unwrap();
+            self.manager.save_inode(&root_guard)?;
+        }
+
+        let snap_children = self.manager.list_dirents(snapshot_root_id)?;
+        for child in snap_children {
+            let cloned_child = self.clone_subtree_from_metadata(
+                child.child_inode_id,
+                FUSE_ROOT_ID,
+                &child.name,
+                true,
+            )?;
+            self.root
+                .write()
+                .unwrap()
+                .children
+                .insert(child.name, cloned_child);
+        }
+
+        Ok(())
+    }
+
+    fn inode_in_snapshot(&self, ino: u64) -> bool {
+        let snaps = self.snapshots.read().unwrap();
+        for (_name, snapshot) in snaps.iter() {
+            if self.find_in_snapshot_tree(&snapshot.root, ino).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn read_cached_or_load(&self, ino: u64) -> Result<Vec<u8>, String> {
+        if let Some((data, _dirty)) = self.page_cache.read().unwrap().get(&ino).cloned() {
+            return Ok(data);
+        }
+
+        let data = self.manager.read_file_by_id(ino).unwrap_or_default();
+        self.page_cache
+            .write()
+            .unwrap()
+            .insert(ino, (data.clone(), false));
+        Ok(data)
+    }
+
+    fn write_to_cache(&self, ino: u64, data: Vec<u8>, is_dirty: bool) {
+        self.page_cache.write().unwrap().insert(ino, (data, is_dirty));
+    }
+
+    fn flush_inode_cache(&self, ino: u64) -> Result<(), String> {
+        let dirty_data = {
+            let cache = self.page_cache.read().unwrap();
+            match cache.get(&ino) {
+                Some((buffer, true)) => Some(buffer.clone()),
+                _ => None,
+            }
+        };
+
+        if let Some(buffer) = dirty_data {
+            self.manager.write_file_by_id(ino, &buffer)?;
+            self.page_cache
+                .write()
+                .unwrap()
+                .insert(ino, (buffer, false));
+        }
+
+        Ok(())
+    }
+
+    fn flush_all_dirty_cache(&self) -> Result<(), String> {
+        let keys: Vec<u64> = self.page_cache.read().unwrap().keys().copied().collect();
+        for ino in keys {
+            self.flush_inode_cache(ino)?;
+        }
+        Ok(())
+    }
+
+    fn evict_inode_cache(&self, ino: u64) {
+        self.page_cache.write().unwrap().remove(&ino);
+    }
+
+
+    /// Walks the path, applying Copy-on-Write (Shadow Paging) to any shared nodes.
+    /// Returns a mutable lock to the final requested file/directory.
+    fn get_mutable_inode(&mut self, path: &str) -> Result<Arc<RwLock<Inode>>, i32> {
+        // 1. If modifying the root directly, we MUST replace the root.
         if path.is_empty() {
-            // Special case: modifying root directly
             if Arc::strong_count(&self.root) > 1 {
-                println!(
-                    "[CoW] WARNING: Root is shared but cannot be replaced (architectural limitation)"
-                );
+                // TASK 1: The root is shared with a snapshot. We must deep clone it.
+                // Step A: Read the old root.
+                let old_root = self.root.read().unwrap();
+
+                // Step B: Create a new Inode. Give it a NEW ID!
+                let new_root = Inode {
+                    id: old_root.id,
+                    parent_id: old_root.parent_id,
+                    name: old_root.name.clone(),
+                    attr: old_root.attr.clone(),
+                    recipe: old_root.recipe.clone(),
+                    // We clone the children pointers. We will CoW them later if needed.
+                    children: old_root.children.clone(),
+                };
+
+                drop(old_root);
+
+                // Step C: Wrap it in a new Arc and overwrite self.root
+                self.root = Arc::new(RwLock::new(new_root));
+
+                // Note: The snapshot still holds the old root via its own Arc!
             }
             return Ok(self.root.clone());
         }
 
+        // 2. Split the path into a Vector of strings (e.g., ["projects", "backend", "api.rs"])
         let parts: Vec<&str> = path
             .split('/')
             .filter(|p| !p.is_empty())
             .collect();
 
-        // Build the path from root, CoW-ing each shared node along the way
-        let mut path_stack: Vec<(Arc<RwLock<Inode>>, String)> = vec![(
-            self.root.clone(),
-            String::new(),
-        )];
+        // 3. We keep a tracking pointer as we walk down the tree. Start at the root.
+        let mut current_arc = self.root.clone();
 
+        // 4. Walk down the tree, checking every directory in the path.
         for part in parts.iter() {
-            let current_arc = path_stack.last().unwrap().0.clone();
-            let current = current_arc.read().unwrap();
+            // We need to look at the current directory's children.
+            let mut current_node = current_arc.write().unwrap();
 
-            if let Some(child_arc) = current.children.get(*part) {
-                let child_clone = child_arc.clone();
-                drop(current); // Drop before mutable borrow
-                path_stack.push((child_clone, part.to_string()));
-            } else {
-                return Err(ENOENT);
-            }
-        }
+            // Find the child in the hashmap.
+            // `get_mut` gives us a mutable reference to the Arc inside the map.
+            if let Some(child_arc_ref) = current_node.children.get_mut(*part) {
+                // Is this child shared with a snapshot?
+                if Arc::strong_count(child_arc_ref) > 1 {
+                    // TASK 2: SHADOW PAGING (The actual CoW logic)
+                    let old_child = child_arc_ref.read().unwrap();
 
-        // Now walk backwards, CoW-ing shared nodes
-        for i in (0..path_stack.len()).rev() {
-            let (node_arc, node_name) = &path_stack[i];
+                    let new_id = self.next_inode.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-            if Arc::strong_count(node_arc) > 1 {
-                if i == 0 {
-                    // Root is shared - we can't replace it, but we can still modify its children
-                    println!(
-                        "[CoW] Root is shared (ref_count={}), but modifying children directly",
-                        Arc::strong_count(node_arc)
-                    );
-                    // For root-level files, we'll clone them in-place in the root's children map
-                    if path_stack.len() == 2 {
-                        // Modifying a direct child of root
-                        let root = self.root.write().unwrap();
-                        let child_name = &path_stack[1].1;
-                        if
-                            let Some(child_arc) = root.children.get(child_name) &&
-                            Arc::strong_count(child_arc) > 1
-                        {
-                            println!("[CoW] Cloning root-level node '{}' (keeping same ID)", child_name);
-                            let old_child = child_arc.read().unwrap();
-                            let new_child = old_child.clone(); // Keep same ID!
-                            let old_id = new_child.id;
-                            drop(old_child);
+                    // Step A: Create the replacement Inode with a NEW ID.
+                    let new_child = Inode {
+                        id: new_id,
+                        parent_id: old_child.parent_id,
+                        name: old_child.name.clone(),
+                        attr: old_child.attr.clone(),
+                        recipe: old_child.recipe.clone(),
+                        // We clone the children pointers. We will CoW them later if needed.
+                        children: old_child.children.clone(),
+                    };
 
-                            // Create new Arc with cloned data but SAME ID
-                            let new_child_arc = Arc::new(RwLock::new(new_child));
-                            self.inode_registry
-                                .write()
-                                .unwrap()
-                                .insert(old_id, new_child_arc.clone());
-                            drop(root);
+                    // Step B: Wrap it in our armor.
+                    let new_child_arc = Arc::new(RwLock::new(new_child));
 
-                            // Update root's children map
-                            self.root
-                                .write()
-                                .unwrap()
-                                .children.insert(child_name.clone(), new_child_arc.clone());
-                            return Ok(new_child_arc);
-                        }
-                    }
-                } else {
-                    // Clone this node and update parent's pointer (KEEP SAME ID)
-                    println!("[CoW] Node '{}' is shared! Cloning (keeping same ID)...", node_name);
+                    // Step C: Update the Global Registry so the kernel can find the new ID!
+                    self.inode_registry.write().unwrap().insert(new_id, new_child_arc.clone());
 
-                    let old_inode = node_arc.read().unwrap();
-                    let new_inode = old_inode.clone(); // Keep same ID
-                    let same_id = new_inode.id;
-                    drop(old_inode);
+                    drop(old_child);
 
-                    let new_arc = Arc::new(RwLock::new(new_inode));
-                    self.inode_registry.write().unwrap().insert(same_id, new_arc.clone());
-
-                    // Update parent's children map
-                    let (parent_arc, _) = &path_stack[i - 1];
-                    parent_arc.write().unwrap().children.insert(node_name.clone(), new_arc.clone());
-
-                    // Update path_stack for remaining iterations
-                    path_stack[i] = (new_arc.clone(), node_name.clone());
+                    // Step D: Replace the pointer in the parent's Hash Map!
+                    // *child_arc_ref safely overwrites the value in `current_node.children`
+                    *child_arc_ref = new_child_arc.clone();
                 }
+
+                // Move our tracking pointer down to the child we just checked/cloned.
+                let next_arc = child_arc_ref.clone();
+
+                // Drop the write lock on the parent BEFORE we loop, or we deadlock!
+                drop(current_node);
+
+                current_arc = next_arc;
+            } else {
+                // If a part of the path doesn't exist, return ENOENT (Error No Entity)
+                return Err(libc::ENOENT);
             }
         }
 
-        Ok(path_stack.last().unwrap().0.clone())
+        // 5. We reached the bottom of the path. Return the final, safely isolated file.
+        Ok(current_arc)
     }
 
     fn get_path_from_inode(&self, target_ino: u64) -> Option<String> {
@@ -287,33 +588,6 @@ impl BetterFS {
         }
 
         let mut queue = vec![(self.root.clone(), String::new())];
-
-        while let Some((node_arc, path)) = queue.pop() {
-            let node = node_arc.read().unwrap();
-
-            if node.id == target_ino {
-                return Some(path);
-            }
-
-            for (name, child_arc) in node.children.iter() {
-                let child_path = if path.is_empty() {
-                    name.clone()
-                } else {
-                    format!("{}/{}", path, name)
-                };
-                queue.push((child_arc.clone(), child_path));
-            }
-        }
-
-        None
-    }
-
-    fn get_path_from_snapshot_tree(
-        &self,
-        root: &Arc<RwLock<Inode>>,
-        target_ino: u64
-    ) -> Option<String> {
-        let mut queue = vec![(root.clone(), String::new())];
 
         while let Some((node_arc, path)) = queue.pop() {
             let node = node_arc.read().unwrap();
@@ -368,6 +642,10 @@ impl Filesystem for BetterFS {
         }
 
         if parent == SNAPSHOT_DIR_ID {
+            if name_str == ".create" {
+                return reply.entry(&TTL, &snapshot_create_attr(), 0);
+            }
+
             let snaps = self.snapshots.read().unwrap();
             if let Some(snap) = snaps.get(name_str) {
                 let mut root_attr = snap.root.read().unwrap().attr;
@@ -431,6 +709,10 @@ impl Filesystem for BetterFS {
             return reply.attr(&TTL, &dir_attr(SNAPSHOT_DIR_ID));
         }
 
+        if ino == SNAPSHOT_CREATE_ID {
+            return reply.attr(&TTL, &snapshot_create_attr());
+        }
+
         // Check if ino is in a snapshot tree
         let snaps = self.snapshots.read().unwrap();
         for (_snap_name, snapshot) in snaps.iter() {
@@ -463,11 +745,12 @@ impl Filesystem for BetterFS {
             if offset == 0 {
                 let _ = reply.add(SNAPSHOT_DIR_ID, 0, FileType::Directory, ".");
                 let _ = reply.add(FUSE_ROOT_ID, 1, FileType::Directory, "..");
+                let _ = reply.add(SNAPSHOT_CREATE_ID, 2, FileType::RegularFile, ".create");
 
                 let snaps = self.snapshots.read().unwrap();
                 for (i, (name, snapshot)) in snaps.iter().enumerate() {
                     let snap_root_id = snapshot.root.read().unwrap().id;
-                    let _ = reply.add(snap_root_id, (i + 2) as i64, FileType::Directory, name);
+                    let _ = reply.add(snap_root_id, (i + 3) as i64, FileType::Directory, name);
                 }
             }
             reply.ok();
@@ -546,42 +829,51 @@ impl Filesystem for BetterFS {
         _lock_owner: Option<u64>,
         reply: ReplyData
     ) {
-        // Try live filesystem first
-        let path = self.get_path_from_inode(ino);
+        if ino == SNAPSHOT_CREATE_ID {
+            return reply.data(&[]);
+        }
 
-        // If not in live tree, search snapshots
-        let path = if path.is_none() {
+        // 1. Check if the Inode exists in our live registry or snapshots
+        let mut target_recipe = None;
+
+        // Try Live Registry first
+        let registry = self.inode_registry.read().unwrap();
+        if registry.contains_key(&ino) {
+            // Fetch data directly by Inode ID from the manager
+            target_recipe = Some(self.manager.read_file_by_id(ino));
+        } else {
+            // Fallback: Check Snapshots (Chronos)
             let snaps = self.snapshots.read().unwrap();
-            let mut found_path = None;
-            for (_snap_name, snapshot) in snaps.iter() {
-                if let Some(p) = self.get_path_from_snapshot_tree(&snapshot.root, ino) {
-                    found_path = Some(p);
+            for (_name, snapshot) in snaps.iter() {
+                if self.find_in_snapshot_tree(&snapshot.root, ino).is_some() {
+                    target_recipe = Some(self.manager.read_file_by_id(ino));
                     break;
                 }
             }
-            found_path
-        } else {
-            path
-        };
+        }
+        drop(registry);
 
-        let path = match path {
-            Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
-            }
-        };
-
-        match self.manager.read_file(&path) {
-            Ok(data) => {
+        // 2. Handle the Data Retrieval
+        match target_recipe {
+            Some(Ok(_)) => {
+                let data = self.read_cached_or_load(ino).unwrap_or_default();
                 let start = offset as usize;
                 if start < data.len() {
                     let end = std::cmp::min(start + (size as usize), data.len());
                     reply.data(&data[start..end]);
                 } else {
+                    // Offset is at or beyond EOF
                     reply.data(&[]);
                 }
             }
-            Err(_) => reply.error(libc::EIO),
+            Some(Err(_)) => {
+                // File exists in registry but data retrieval failed (e.g. empty file)
+                reply.data(&[]);
+            }
+            None => {
+                // Inode doesn't exist anywhere
+                reply.error(libc::ENOENT);
+            }
         }
     }
 
@@ -595,42 +887,51 @@ impl Filesystem for BetterFS {
         _write_flags: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-        reply: ReplyWrite
+        reply: ReplyWrite,
     ) {
-        let path = match self.get_path_from_inode(ino) {
-            Some(p) => p,
-            None => {
-                return reply.error(ENOENT);
+        if ino == SNAPSHOT_CREATE_ID {
+            if offset != 0 {
+                return reply.error(EINVAL);
             }
-        };
 
-        println!("[WRITE] Request to modify '{}'", path);
-
-        match self.get_mutable_inode(&path) {
-            Ok(inode_arc) => {
-                let mut file_data = self.manager.read_file(&path).unwrap_or_default();
-
-                let end = (offset as usize) + data.len();
-                if end > file_data.len() {
-                    file_data.resize(end, 0);
-                }
-                file_data[offset as usize..end].copy_from_slice(data);
-
-                if self.manager.write_file(&path, &file_data).is_err() {
-                    return reply.error(libc::EIO);
-                }
-
-                // Update inode size after successful write
-                let mut inode = inode_arc.write().unwrap();
-                inode.attr.size = file_data.len() as u64;
-                inode.attr.blocks = (file_data.len() as u64).div_ceil(512);
-                inode.attr.mtime = SystemTime::now();
-                drop(inode);
-
-                reply.written(data.len() as u32);
+            let snap_name = String::from_utf8_lossy(data).trim().to_string();
+            if snap_name.is_empty() {
+                return reply.error(EINVAL);
             }
-            Err(e) => reply.error(e),
+
+            return match self.create_snapshot_named(&snap_name) {
+                Ok(_) => reply.written(data.len() as u32),
+                Err(e) if e.contains("already exists") => reply.error(EEXIST),
+                Err(_) => reply.error(libc::EIO),
+            };
         }
+
+        if self.inode_in_snapshot(ino) {
+            return reply.error(EROFS);
+        }
+
+        // 1. Read existing data via page cache (or load from backend)
+        let mut file_data = self.read_cached_or_load(ino).unwrap_or_default();
+
+        // 2. Overlay new data
+        let end = (offset as usize) + data.len();
+        if end > file_data.len() {
+            file_data.resize(end, 0);
+        }
+        file_data[offset as usize..end].copy_from_slice(data);
+
+        // 3. Write-back cache: mark dirty and return success
+        self.write_to_cache(ino, file_data.clone(), true);
+
+        if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino) {
+            let mut node = node_arc.write().unwrap();
+            node.attr.size = file_data.len() as u64;
+            node.attr.blocks = node.attr.size.div_ceil(512);
+            node.attr.mtime = SystemTime::now();
+            let _ = self.manager.save_inode(&node);
+        }
+
+        reply.written(data.len() as u32);
     }
 
     fn create(
@@ -641,38 +942,50 @@ impl Filesystem for BetterFS {
         _mode: u32,
         _umask: u32,
         _flags: i32,
-        reply: ReplyCreate
+        reply: ReplyCreate,
     ) {
-        let name_str = name.to_str().unwrap();
-
-        // [CoW] Trigger CoW on parent path before modification
-        if let Some(parent_path) = self.get_path_from_inode(parent) {
-            println!("[CREATE] Ensuring parent '{}' is mutable", if parent_path.is_empty() {
-                "/"
-            } else {
-                &parent_path
-            });
-            let _ = self.get_mutable_inode(&parent_path);
+        if parent == SNAPSHOT_DIR_ID || self.inode_in_snapshot(parent) {
+            return reply.error(EROFS);
         }
 
-        let registry = self.inode_registry.read().unwrap();
-        let parent_node = match registry.get(&parent) {
-            Some(node) => node.clone(),
-            None => {
-                return reply.error(ENOENT);
-            }
-        };
-        drop(registry);
-
-        let mut parent_guard = parent_node.write().unwrap();
-
+        let name_str = name.to_str().unwrap().to_string();
         let new_id = self.generate_id();
-        let new_inode = Inode::new(new_id, FileType::RegularFile);
+        
+        // 1. Create Inode in memory with its IDENTITY
+        let mut new_inode = Inode::new(new_id, FileType::RegularFile);
+        new_inode.name = name_str.clone();   // Store the name
+        new_inode.parent_id = parent;        // Store the backlink
+
+        // 2. Persist the FULL Inode Metadata to DB
+        // This includes name, parent_id, and attributes
+        if let Err(_e) = self.manager.save_inode(&new_inode) {
+            return reply.error(libc::EIO);
+        }
+
+        if self.manager.save_dirent(parent, &name_str, new_id).is_err() {
+            return reply.error(libc::EIO);
+        }
+
+        // 3. Initialize an empty Recipe in the DB
+        // This ensures the file is valid even before the first write
+        let recipe = FileRecipe {
+            file_size: 0,
+            chunks: vec![],
+            kind: FileKind::File,
+        };
+        let _ = self.manager.save_recipe(new_id, &recipe);
+
+        // 4. Update memory structures
         let new_arc = Arc::new(RwLock::new(new_inode));
-
+        
+        // Update Parent's child map
+        if let Some(parent_node) = self.inode_registry.read().unwrap().get(&parent) {
+            parent_node.write().unwrap().children.insert(name_str, new_arc.clone());
+        }
+        
+        // Update Global Registry
         self.inode_registry.write().unwrap().insert(new_id, new_arc.clone());
-        parent_guard.children.insert(name_str.to_string(), new_arc.clone());
-
+        
         let attr = new_arc.read().unwrap().attr;
         reply.created(&TTL, &attr, 0, 0, 0);
     }
@@ -688,13 +1001,20 @@ impl Filesystem for BetterFS {
     ) {
         let name_str = name.to_str().unwrap();
 
+        if parent == SNAPSHOT_DIR_ID && name_str != ".create" {
+            return reply.error(EROFS);
+        }
+
+        if self.inode_in_snapshot(parent) {
+            return reply.error(EROFS);
+        }
+
         // Handle snapshot restoration
         if let Some(snap_name) = name_str.strip_prefix(".restore_") {
             println!("[CHRONOS] Restore requested: {}", snap_name);
 
-            let snaps = self.snapshots.read().unwrap();
-            if snaps.get(snap_name).is_some() {
-                drop(snaps);
+            let snap_exists = self.snapshots.read().unwrap().contains_key(snap_name);
+            if snap_exists {
 
                 // Auto-backup current state before restore
                 let backup_name = format!(
@@ -706,50 +1026,17 @@ impl Filesystem for BetterFS {
                 );
                 println!("[CHRONOS] Auto-saving current state as '{}'", backup_name);
 
-                // Create backup snapshot
-                let live_root = self.root.read().unwrap();
-                let mut backup_root_node = live_root.clone();
-                drop(live_root);
+                if let Err(e) = self.create_snapshot_named(&backup_name) {
+                    println!("[CHRONOS] Error: Failed to create backup snapshot '{}': {}", backup_name, e);
+                    return reply.error(libc::EIO);
+                }
 
-                let backup_root_id = self.generate_id();
-                backup_root_node.id = backup_root_id;
-                backup_root_node.attr.ino = backup_root_id;
-                let backup_root = Arc::new(RwLock::new(backup_root_node));
-
-                let backup_timestamp = SystemTime::now();
-                let mut snaps_write = self.snapshots.write().unwrap();
-                snaps_write.insert(backup_name.clone(), Snapshot {
-                    name: backup_name.clone(),
-                    timestamp: backup_timestamp,
-                    root: backup_root,
-                });
-                drop(snaps_write);
-
-                // Persist backup
-                let unix_ts = backup_timestamp
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let _ = self.manager.save_snapshot(&backup_name, unix_ts, backup_root_id);
-
-                // Now restore: deep clone snapshot root to make it the new live root
+                // Restore the snapshot content into live filesystem and persist it
                 println!("[CHRONOS] Restoring snapshot '{}'...", snap_name);
-                let snaps_read = self.snapshots.read().unwrap();
-                let target_snap = snaps_read.get(snap_name).unwrap();
-                let snap_root = target_snap.root.read().unwrap();
-                let mut restored_root_node = snap_root.clone();
-                drop(snap_root);
-                drop(snaps_read);
-
-                // Restored root keeps ID=1 for live filesystem
-                restored_root_node.id = FUSE_ROOT_ID;
-                restored_root_node.attr.ino = FUSE_ROOT_ID;
-
-                // Swap the root
-                self.root = Arc::new(RwLock::new(restored_root_node));
-
-                // Update inode registry
-                self.inode_registry.write().unwrap().insert(FUSE_ROOT_ID, self.root.clone());
+                if let Err(e) = self.restore_live_from_snapshot(snap_name) {
+                    println!("[CHRONOS] Error: Failed to restore snapshot '{}': {}", snap_name, e);
+                    return reply.error(libc::EIO);
+                }
 
                 println!(
                     "[CHRONOS] ✓ Restored to snapshot '{}' (backup saved as '{}')",
@@ -766,42 +1053,11 @@ impl Filesystem for BetterFS {
         if let Some(snap_name) = name_str.strip_prefix(".snap_") {
             println!("[CHRONOS] Taking Snapshot: {}", snap_name);
 
-            // Deep clone the root node to freeze its state
-            // This creates a NEW root with its own children HashMap
-            let live_root = self.root.read().unwrap();
-            let mut frozen_root_node = live_root.clone(); // Deep clone the Inode struct
-            drop(live_root);
-
-            // Assign unique ID for FUSE
-            let snap_root_id = self.generate_id();
-            frozen_root_node.id = snap_root_id;
-            frozen_root_node.attr.ino = snap_root_id;
-
-            let frozen_root = Arc::new(RwLock::new(frozen_root_node));
-            let count = Arc::strong_count(&self.root);
-            println!("[GC] Root Inode ref_count: {}", count);
-            println!("[CHRONOS] Snapshot root ID: {} (live root ID: 1)", snap_root_id);
-
-            let timestamp = SystemTime::now();
-            let mut snaps = self.snapshots.write().unwrap();
-
-            snaps.insert(snap_name.to_string(), Snapshot {
-                name: snap_name.to_string(),
-                timestamp,
-                root: frozen_root,
-            });
-
-            // Persist snapshot metadata to disk
-            let unix_timestamp = timestamp
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let root_id = self.root.read().unwrap().id;
-            if let Err(e) = self.manager.save_snapshot(snap_name, unix_timestamp, root_id) {
-                println!("[CHRONOS] Warning: Failed to persist snapshot: {}", e);
-            }
-
-            return reply.entry(&TTL, &dir_attr(9999), 0);
+            return match self.create_snapshot_named(snap_name) {
+                Ok(_) => reply.entry(&TTL, &dir_attr(9999), 0),
+                Err(e) if e.contains("already exists") => reply.error(EEXIST),
+                Err(_) => reply.error(libc::EIO),
+            };
         }
 
         // [CoW] Trigger CoW on parent path before modification
@@ -826,7 +1082,17 @@ impl Filesystem for BetterFS {
         let mut parent_guard = parent_node.write().unwrap();
 
         let new_id = self.generate_id();
-        let new_inode = Inode::new(new_id, FileType::Directory);
+        let mut new_inode = Inode::new(new_id, FileType::Directory);
+        new_inode.name = name_str.to_string();
+        new_inode.parent_id = parent;
+
+        if self.manager.save_inode(&new_inode).is_err() {
+            return reply.error(libc::EIO);
+        }
+        if self.manager.save_dirent(parent, name_str, new_id).is_err() {
+            return reply.error(libc::EIO);
+        }
+
         let new_arc = Arc::new(RwLock::new(new_inode));
 
         self.inode_registry.write().unwrap().insert(new_id, new_arc.clone());
@@ -854,33 +1120,26 @@ impl Filesystem for BetterFS {
         _flags: Option<u32>,
         reply: ReplyAttr
     ) {
-        // [CoW] Trigger CoW if truncating/modifying file size
-        if let Some(new_size) = size && let Some(path) = self.get_path_from_inode(ino) {
-            println!("[SETATTR] Truncating '{}' to {} bytes", path, new_size);
-
-            match self.get_mutable_inode(&path) {
-                Ok(inode_arc) => {
-                    // Perform truncation
-                    let mut file_data = self.manager.read_file(&path).unwrap_or_default();
-                    file_data.resize(new_size as usize, 0);
-
-                    if self.manager.write_file(&path, &file_data).is_err() {
-                        return reply.error(libc::EIO);
-                    }
-
-                    // Update inode attributes
-                    let mut inode = inode_arc.write().unwrap();
-                    inode.attr.size = new_size;
-                    inode.attr.blocks = new_size.div_ceil(512);
-                    inode.attr.mtime = SystemTime::now();
-                    drop(inode);
-                }
-                Err(e) => {
-                    return reply.error(e);
-                }
-            }
+        if self.inode_in_snapshot(ino) {
+            return reply.error(EROFS);
         }
 
+        if let Some(new_size) = size {
+            let mut file_data = self.read_cached_or_load(ino).unwrap_or_default();
+            file_data.resize(new_size as usize, 0);
+
+            self.write_to_cache(ino, file_data, true);
+
+            if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino) {
+                let mut node = node_arc.write().unwrap();
+                node.attr.size = new_size;
+                node.attr.blocks = new_size.div_ceil(512);
+                node.attr.mtime = SystemTime::now();
+                let _ = self.manager.save_inode(&node);
+            }
+        }
+        
+        // Always return the current attributes
         self.getattr(_req, ino, reply);
     }
 
@@ -891,17 +1150,25 @@ impl Filesystem for BetterFS {
     fn release(
         &mut self,
         _req: &Request,
-        _ino: u64,
+        ino: u64,
         _fh: u64,
         _flags: i32,
         _lock_owner: Option<u64>,
         _flush: bool,
         reply: ReplyEmpty
     ) {
-        reply.ok();
+        if self.flush_inode_cache(ino).is_ok() {
+            reply.ok();
+        } else {
+            reply.error(libc::EIO);
+        }
     }
 
     fn unlink(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        if parent == SNAPSHOT_DIR_ID || self.inode_in_snapshot(parent) {
+            return reply.error(EROFS);
+        }
+
         let name_str = name.to_str().unwrap();
 
         let registry = self.inode_registry.read().unwrap();
@@ -915,7 +1182,10 @@ impl Filesystem for BetterFS {
 
         let mut parent_guard = parent_node.write().unwrap();
 
-        if parent_guard.children.remove(name_str).is_some() {
+        if let Some(removed_node) = parent_guard.children.remove(name_str) {
+            let removed_ino = removed_node.read().unwrap().id;
+            let _ = self.manager.delete_dirent(parent, name_str);
+            self.evict_inode_cache(removed_ino);
             reply.ok();
         } else {
             reply.error(ENOENT);

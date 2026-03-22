@@ -1,7 +1,7 @@
-// src/file_manager.rs
 use crate::chunker::Chunker;
 use crate::storage::Storage;
-use serde::{ Deserialize, Serialize };
+use fuser::FileType;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -14,17 +14,36 @@ pub enum FileKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileRecipe {
     pub file_size: u64,
-    pub chunks: Vec<String>, // List of Hash IDs in order
+    pub chunks: Vec<String>,
     pub kind: FileKind,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[allow(dead_code)]
-pub struct DirEntry {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InodeAttr {
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InodeMetadata {
+    pub id: u64,
+    pub parent_id: u64,
     pub name: String,
-    pub kind: FileKind,
-    // In a real FS, we would put an 'inode_number' here.
-    // For now, we will store the 'full path' or a reference to make lookup easy.
+    pub is_dir: bool,
+    pub attr: InodeAttr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Dirent {
+    pub parent_id: u64,
+    pub name: String,
+    pub child_inode_id: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SnapshotMetadata {
+    pub name: String,
+    pub timestamp: u64,
+    pub root_id: u64,
 }
 
 pub struct FileManager {
@@ -32,27 +51,78 @@ pub struct FileManager {
     db: sled::Db,
 }
 
-// Snapshot metadata for persistence
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct SnapshotMetadata {
-    pub name: String,
-    pub timestamp: u64, // Unix timestamp
-    pub root_id: u64, // Inode ID of snapshot root
-}
-
 impl FileManager {
     pub fn new(storage_path: &str) -> Self {
         let storage = Storage::new(storage_path);
-
-        // Open the database inside the same folder
-        // "metadata_db" will be a folder inside your storage path
         let db_path = Path::new(storage_path).join("metadata_db");
         let db = sled::open(db_path).expect("Failed to open metadata database");
-
-        FileManager { storage, db }
+        Self { storage, db }
     }
 
-    // Save snapshot metadata to database
+    fn inode_key(id: u64) -> String {
+        format!("ino_meta:{}", id)
+    }
+
+    fn recipe_key(id: u64) -> String {
+        format!("ino_recipe:{}", id)
+    }
+
+    fn dirent_key(parent_id: u64, name: &str) -> String {
+        format!("dirent:{}:{}", parent_id, name)
+    }
+
+    fn dirent_prefix(parent_id: u64) -> String {
+        format!("dirent:{}:", parent_id)
+    }
+
+    fn map_inode(inode: &crate::fuse_handler::Inode) -> InodeMetadata {
+        InodeMetadata {
+            id: inode.id,
+            parent_id: inode.parent_id,
+            name: inode.name.clone(),
+            is_dir: inode.attr.kind == FileType::Directory,
+            attr: InodeAttr { size: inode.attr.size },
+        }
+    }
+
+    fn create_recipe_from_data(&self, data: &[u8]) -> Result<FileRecipe, String> {
+        let mut chunker = Chunker::new();
+        let mut recipe = Vec::new();
+        let mut current_chunk_buffer = Vec::new();
+        let mut total_size = 0_u64;
+
+        for &byte in data {
+            current_chunk_buffer.push(byte);
+            chunker.feed_byte(byte);
+
+            if chunker.should_cut(current_chunk_buffer.len()) {
+                let hash = self
+                    .storage
+                    .write_chunk(&current_chunk_buffer)
+                    .map_err(|e| format!("Failed to write chunk: {}", e))?;
+                recipe.push(hash);
+                total_size += current_chunk_buffer.len() as u64;
+                current_chunk_buffer.clear();
+                chunker.reset();
+            }
+        }
+
+        if !current_chunk_buffer.is_empty() {
+            let hash = self
+                .storage
+                .write_chunk(&current_chunk_buffer)
+                .map_err(|e| format!("Failed to write tail chunk: {}", e))?;
+            recipe.push(hash);
+            total_size += current_chunk_buffer.len() as u64;
+        }
+
+        Ok(FileRecipe {
+            file_size: total_size,
+            chunks: recipe,
+            kind: FileKind::File,
+        })
+    }
+
     pub fn save_snapshot(&self, name: &str, timestamp: u64, root_id: u64) -> Result<(), String> {
         let key = format!("snapshot:{}", name);
         let metadata = SnapshotMetadata {
@@ -61,336 +131,420 @@ impl FileManager {
             root_id,
         };
 
-        let encoded = bincode
-            ::serialize(&metadata)
+        let encoded = bincode::serialize(&metadata)
             .map_err(|e| format!("Snapshot serialization error: {}", e))?;
 
-        self.db.insert(key.as_bytes(), encoded).map_err(|e| format!("Database error: {}", e))?;
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
 
         self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
-
-        println!("[CHRONOS] Snapshot '{}' metadata persisted to disk", name);
         Ok(())
     }
 
-    // Load all snapshot metadata from database
     pub fn load_snapshots(&self) -> Vec<SnapshotMetadata> {
         let mut snapshots = Vec::new();
-        let prefix = b"snapshot:";
 
-        for item in self.db.scan_prefix(prefix).flatten() {
-            if let Ok(metadata) = bincode::deserialize::<SnapshotMetadata>(&item.1) {
+        for item in self.db.scan_prefix(b"snapshot:") {
+            if let Ok((_, bytes)) = item
+                && let Ok(metadata) = bincode::deserialize::<SnapshotMetadata>(&bytes)
+            {
                 snapshots.push(metadata);
             }
         }
 
-        println!("[CHRONOS] Loaded {} snapshot(s) from disk", snapshots.len());
         snapshots
     }
 
-    // Delete snapshot metadata
     pub fn delete_snapshot(&self, name: &str) -> Result<(), String> {
         let key = format!("snapshot:{}", name);
-        self.db.remove(key.as_bytes()).map_err(|e| format!("Database error: {}", e))?;
-        Ok(())
-    }
-
-    // =======================================================================
-    // PUBLIC API (What the FUSE Frontend will call)
-    // =======================================================================
-
-    /// 1. WRITE: Ingests data, creates a recipe, and saves it to the DB under 'filename'
-    pub fn write_file(&self, filename: &str, data: &[u8]) -> Result<(), String> {
-        // A. Run the math engine to create the recipe (Chunking + Storage)
-        let recipe = self.create_recipe_from_data(data);
-
-        // B. Convert the Recipe struct into bytes (Serialization)
-        let encoded_recipe = bincode
-            ::serialize(&recipe)
-            .map_err(|e| format!("Serialization error: {}", e))?;
-
-        // C. Save to Database (Key: Filename, Value: RecipeBytes)
-        self.db.insert(filename, encoded_recipe).map_err(|e| format!("Database error: {}", e))?;
-
-        // Ensure data is flushed to disk immediately
+        self.db
+            .remove(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
         self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
-
-        println!("Debug: Saved recipe for '{}' ({} chunks)", filename, recipe.chunks.len());
         Ok(())
     }
 
-    /// 2. READ: Looks up a filename, finds the recipe, and reconstructs the data
-    pub fn read_file(&self, filename: &str) -> Result<Vec<u8>, String> {
-        // A. Look up the filename in the DB
-        match self.db.get(filename) {
-            Ok(Some(bytes)) => {
-                // B. Decode the binary back into a Struct
-                let recipe: FileRecipe = bincode
-                    ::deserialize(&bytes)
-                    .map_err(|e| format!("Deserialization error: {}", e))?;
+    pub fn save_inode(&self, inode: &crate::fuse_handler::Inode) -> Result<(), String> {
+        let metadata = Self::map_inode(inode);
+        let key = Self::inode_key(metadata.id);
+        let encoded = bincode::serialize(&metadata)
+            .map_err(|e| format!("Inode serialization error: {}", e))?;
 
-                // C. Safety check for Directories
-                if recipe.kind == FileKind::Directory {
-                    return Ok(Vec::new());
-                }
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
 
-                // D. Reconstruct the file (New Logic handling Results)
-                let mut result = Vec::new();
-                for hash in recipe.chunks {
-                    // We handle the Result from storage.read_chunk here
-                    match self.storage.read_chunk(&hash) {
-                        Ok(chunk_data) => result.extend_from_slice(&chunk_data),
-                        Err(e) => {
-                            return Err(format!("Storage corrupted. Chunk {} missing: {}", hash, e));
-                        }
-                    }
-                }
-                Ok(result)
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn load_inode(&self, inode_id: u64) -> Result<Option<InodeMetadata>, String> {
+        let key = Self::inode_key(inode_id);
+        let value = self
+            .db
+            .get(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        match value {
+            Some(bytes) => {
+                let inode = bincode::deserialize::<InodeMetadata>(&bytes)
+                    .map_err(|e| format!("Inode deserialization error: {}", e))?;
+                Ok(Some(inode))
             }
-            Ok(None) => Err(format!("File not found: {}", filename)),
-            Err(e) => Err(format!("Database error: {}", e)),
+            None => Ok(None),
         }
     }
 
-    /// 3. LIST: Returns a list of all filenames in the system
+    #[allow(dead_code)]
+    pub fn load_all_inodes(&self) -> Vec<InodeMetadata> {
+        let mut inodes = Vec::new();
+
+        for item in self.db.scan_prefix(b"ino_meta:") {
+            if let Ok((_, bytes)) = item
+                && let Ok(inode) = bincode::deserialize::<InodeMetadata>(&bytes)
+            {
+                inodes.push(inode);
+            }
+        }
+
+        inodes
+    }
+
+    pub fn save_dirent(&self, parent_id: u64, name: &str, child_inode_id: u64) -> Result<(), String> {
+        let key = Self::dirent_key(parent_id, name);
+        let encoded = bincode::serialize(&child_inode_id)
+            .map_err(|e| format!("Dirent serialization error: {}", e))?;
+
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn delete_dirent(&self, parent_id: u64, name: &str) -> Result<(), String> {
+        let key = Self::dirent_key(parent_id, name);
+        self.db
+            .remove(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn list_dirents(&self, parent_id: u64) -> Result<Vec<Dirent>, String> {
+        let prefix = Self::dirent_prefix(parent_id);
+        let mut out = Vec::new();
+
+        for item in self.db.scan_prefix(prefix.as_bytes()) {
+            let (key, value) = item.map_err(|e| format!("Database error: {}", e))?;
+
+            let key_str = String::from_utf8(key.to_vec())
+                .map_err(|e| format!("Invalid UTF-8 dirent key: {}", e))?;
+
+            let name = key_str
+                .strip_prefix(&prefix)
+                .ok_or_else(|| format!("Invalid dirent key prefix: {}", key_str))?
+                .to_string();
+
+            let child_inode_id = bincode::deserialize::<u64>(&value)
+                .map_err(|e| format!("Dirent deserialization error: {}", e))?;
+
+            out.push(Dirent {
+                parent_id,
+                name,
+                child_inode_id,
+            });
+        }
+
+        Ok(out)
+    }
+
+    pub fn save_recipe(&self, inode_id: u64, recipe: &FileRecipe) -> Result<(), String> {
+        let key = Self::recipe_key(inode_id);
+        let encoded = bincode::serialize(recipe)
+            .map_err(|e| format!("Recipe serialization error: {}", e))?;
+
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn load_recipe(&self, inode_id: u64) -> Result<Option<FileRecipe>, String> {
+        let key = Self::recipe_key(inode_id);
+        let value = self
+            .db
+            .get(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        match value {
+            Some(bytes) => {
+                let recipe = bincode::deserialize::<FileRecipe>(&bytes)
+                    .map_err(|e| format!("Recipe deserialization error: {}", e))?;
+                Ok(Some(recipe))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub fn write_file_by_id(&self, inode_id: u64, data: &[u8]) -> Result<(), String> {
+        let recipe = self.create_recipe_from_data(data)?;
+        self.save_recipe(inode_id, &recipe)
+    }
+
+    pub fn read_file_by_id(&self, inode_id: u64) -> Result<Vec<u8>, String> {
+        let recipe = self
+            .load_recipe(inode_id)?
+            .ok_or_else(|| format!("Recipe not found for inode {}", inode_id))?;
+
+        if recipe.kind == FileKind::Directory {
+            return Ok(Vec::new());
+        }
+
+        let mut data = Vec::new();
+        for hash in recipe.chunks {
+            let chunk = self
+                .storage
+                .read_chunk(&hash)
+                .map_err(|e| format!("Failed reading chunk {}: {}", hash, e))?;
+            data.extend_from_slice(&chunk);
+        }
+
+        Ok(data)
+    }
+
+    fn get_legacy_key(name: &str) -> String {
+        format!("legacy_name:{}", name)
+    }
+
+    fn get_next_legacy_ino(&self) -> Result<u64, String> {
+        let key = b"legacy:next_ino";
+        let current = match self.db.get(key).map_err(|e| format!("Database error: {}", e))? {
+            Some(bytes) => bincode::deserialize::<u64>(&bytes)
+                .map_err(|e| format!("Counter deserialization error: {}", e))?,
+            None => 1_000_000,
+        };
+
+        let next = current + 1;
+        let encoded = bincode::serialize(&next)
+            .map_err(|e| format!("Counter serialization error: {}", e))?;
+        self.db
+            .insert(key, encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        Ok(current)
+    }
+
+    pub fn write_file(&self, filename: &str, data: &[u8]) -> Result<(), String> {
+        let legacy_key = Self::get_legacy_key(filename);
+
+        let inode_id = match self
+            .db
+            .get(legacy_key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?
+        {
+            Some(bytes) => bincode::deserialize::<u64>(&bytes)
+                .map_err(|e| format!("Legacy inode deserialization error: {}", e))?,
+            None => {
+                let id = self.get_next_legacy_ino()?;
+                let encoded = bincode::serialize(&id)
+                    .map_err(|e| format!("Legacy inode serialization error: {}", e))?;
+                self.db
+                    .insert(legacy_key.as_bytes(), encoded)
+                    .map_err(|e| format!("Database error: {}", e))?;
+                id
+            }
+        };
+
+        self.write_file_by_id(inode_id, data)?;
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn read_file(&self, filename: &str) -> Result<Vec<u8>, String> {
+        let legacy_key = Self::get_legacy_key(filename);
+        let inode_id = self
+            .db
+            .get(legacy_key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?
+            .ok_or_else(|| format!("File not found: {}", filename))
+            .and_then(|bytes| {
+                bincode::deserialize::<u64>(&bytes)
+                    .map_err(|e| format!("Legacy inode deserialization error: {}", e))
+            })?;
+
+        self.read_file_by_id(inode_id)
+    }
+
     pub fn list_files(&self) -> Vec<String> {
         let mut files = Vec::new();
-        // Iterate over every key in the DB
-        for item in self.db.iter() {
-            if let Ok((key, _)) = item && let Ok(filename) = String::from_utf8(key.to_vec()) {
-                files.push(filename);
+        for item in self.db.scan_prefix(b"legacy_name:") {
+            if let Ok((key, _)) = item
+                && let Ok(key_str) = String::from_utf8(key.to_vec())
+                && let Some(name) = key_str.strip_prefix("legacy_name:")
+            {
+                files.push(name.to_string());
             }
         }
+        files.sort();
         files
     }
 
-    // 4. GARBAGE COLLECTION: Cleans up unreferenced chunks from storage
     pub fn run_gc(&self) -> Result<usize, String> {
-        println!("GC: Starting Mark-and-Sweep...");
-
-        // 1. MARK: Collect all hashes currently in use by active files
         let mut active_hashes = HashSet::new();
 
-        for item in self.db.iter() {
-            let (_, value) = item.map_err(|e| e.to_string())?;
-            // Deserialize recipe
+        for item in self.db.scan_prefix(b"ino_recipe:") {
+            let (_, value) = item.map_err(|e| format!("Database error: {}", e))?;
             if let Ok(recipe) = bincode::deserialize::<FileRecipe>(&value) {
                 for hash in recipe.chunks {
                     active_hashes.insert(hash);
                 }
             }
         }
-        println!("GC: Found {} active chunks referenced in DB.", active_hashes.len());
 
-        // 2. SWEEP: List all chunks on disk
-        let all_chunks_on_disk = self.storage
+        let all_chunks = self
+            .storage
             .list_all_chunks()
             .map_err(|e| format!("Storage error: {}", e))?;
 
-        // 3. DESTROY: Delete orphans
         let mut deleted_count = 0;
-        for chunk_hash in all_chunks_on_disk {
-            if !active_hashes.contains(&chunk_hash) {
-                // It's an orphan!
+        for hash in all_chunks {
+            if !active_hashes.contains(&hash) {
                 self.storage
-                    .delete_chunk(&chunk_hash)
-                    .map_err(|e| format!("Failed to delete {}: {}", chunk_hash, e))?;
+                    .delete_chunk(&hash)
+                    .map_err(|e| format!("Failed to delete {}: {}", hash, e))?;
                 deleted_count += 1;
             }
         }
 
-        println!("GC: Cleanup complete. Deleted {} orphaned chunks.", deleted_count);
         Ok(deleted_count)
     }
 
-    // =======================================================================
-    // INTERNAL HELPERS (The "Engine Room" - Private)
-    // =======================================================================
-
-    /// The core logic from your old write_file
-    fn create_recipe_from_data(&self, data: &[u8]) -> FileRecipe {
-        let mut chunker = Chunker::new(); // Ensure Chunker is imported
-        let mut recipe = Vec::new();
-        let mut current_chunk_buffer = Vec::new();
-        let mut total_size = 0;
-
-        for &byte in data {
-            current_chunk_buffer.push(byte);
-            chunker.feed_byte(byte);
-
-            // CHANGED: Simplified logic.
-            // We cut if the algorithm says so, AND we have at least 2KB...
-            // OR if the buffer gets too big (e.g., 64KB) to prevent massive memory usage.
-            if
-                (chunker.should_cut() && current_chunk_buffer.len() >= 2048) ||
-                current_chunk_buffer.len() >= 65536
-            {
-                let hash = self.storage
-                    .write_chunk(&current_chunk_buffer)
-                    .expect("Failed to write chunk");
-                recipe.push(hash);
-                total_size += current_chunk_buffer.len() as u64;
-                current_chunk_buffer.clear();
-            }
-        }
-
-        // HANDLE THE TAIL (The last piece of the file)
-        if !current_chunk_buffer.is_empty() {
-            let hash = self.storage
-                .write_chunk(&current_chunk_buffer)
-                .expect("Failed to write tail chunk");
-            recipe.push(hash);
-            total_size += current_chunk_buffer.len() as u64;
-        }
-
-        FileRecipe {
-            file_size: total_size,
-            chunks: recipe,
-            kind: FileKind::File,
-        }
-    }
-
-    /// The core logic from your old read_file
     #[allow(dead_code)]
-    fn reconstruct_from_recipe(&self, recipe: &FileRecipe) -> Vec<u8> {
-        let mut data = Vec::new();
-
-        for hash in &recipe.chunks {
-            // FIX: Use 'if let Ok' instead of 'if let Some'
-            if let Ok(chunk) = self.storage.read_chunk(hash) {
-                data.extend_from_slice(&chunk);
-            } else {
-                eprintln!("Warning: Failed to read chunk {}", hash);
-            }
-        }
-
-        data
-    }
-    /// Helper for FUSE: Check if a file exists and return its size
     pub fn get_file_metadata(&self, filename: &str) -> Option<(u64, FileKind)> {
-        match self.db.get(filename) {
-            Ok(Some(bytes)) => {
-                // Deserialize the recipe to check its Kind
-                if let Ok(recipe) = bincode::deserialize::<FileRecipe>(&bytes) {
-                    return Some((recipe.file_size, recipe.kind));
-                }
-                None
-            }
-            _ => None,
-        }
+        let legacy_key = Self::get_legacy_key(filename);
+        let inode_id = self
+            .db
+            .get(legacy_key.as_bytes())
+            .ok()
+            .flatten()
+            .and_then(|bytes| bincode::deserialize::<u64>(&bytes).ok())?;
+
+        let recipe = self.load_recipe(inode_id).ok().flatten()?;
+        Some((recipe.file_size, recipe.kind))
     }
 
     #[allow(dead_code)]
     pub fn delete_file(&self, filename: &str) -> Result<(), String> {
-        self.db.remove(filename).map_err(|e| e.to_string())?;
+        let legacy_key = Self::get_legacy_key(filename);
+        self.db
+            .remove(legacy_key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
         Ok(())
     }
 
     #[allow(dead_code)]
     pub fn rename_file(&self, old_name: &str, new_name: &str) -> Result<(), String> {
-        // 1. Get the recipe for the old name
-        if let Some(data) = self.db.get(old_name).map_err(|e| e.to_string())? {
-            // 2. Insert it under the new name
-            self.db.insert(new_name, data).map_err(|e| e.to_string())?;
-            // 3. Remove the old name
-            self.db.remove(old_name).map_err(|e| e.to_string())?;
-            Ok(())
-        } else {
-            Err("File not found".to_string())
-        }
+        let old_key = Self::get_legacy_key(old_name);
+        let new_key = Self::get_legacy_key(new_name);
+
+        let value = self
+            .db
+            .get(old_key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?
+            .ok_or_else(|| format!("File not found: {}", old_name))?;
+
+        self.db
+            .insert(new_key.as_bytes(), value)
+            .map_err(|e| format!("Database error: {}", e))?;
+        self.db
+            .remove(old_key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn create_directory(&self, path: &str) -> Result<(), String> {
+    pub fn create_directory(&self, filename: &str) -> Result<(), String> {
         let recipe = FileRecipe {
             file_size: 0,
-            chunks: vec![],
+            chunks: Vec::new(),
             kind: FileKind::Directory,
         };
-        let encoded: Vec<u8> = bincode::serialize(&recipe).map_err(|e| e.to_string())?;
-        self.db.insert(path, encoded).map_err(|e| e.to_string())?;
+
+        let legacy_key = Self::get_legacy_key(filename);
+        let inode_id = self.get_next_legacy_ino()?;
+        let encoded = bincode::serialize(&inode_id)
+            .map_err(|e| format!("Legacy inode serialization error: {}", e))?;
+
+        self.db
+            .insert(legacy_key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        self.save_recipe(inode_id, &recipe)?;
         Ok(())
+    }
+
+    pub fn inspect_records(&self) -> Vec<(String, Option<FileRecipe>)> {
+        let mut records = Vec::new();
+
+        for item in self.db.iter() {
+            if let Ok((key, value)) = item {
+                let key_str = String::from_utf8_lossy(&key).to_string();
+                let parsed_recipe = bincode::deserialize::<FileRecipe>(&value).ok();
+                records.push((key_str, parsed_recipe));
+            }
+        }
+
+        records
     }
 }
 
-// =======================================================================
-// TESTS
-// =======================================================================
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
 
     #[test]
-    fn test_database_persistence() {
-        let db_path = "./test_db_persistence";
-        // Clean up previous runs
-        if Path::new(db_path).exists() {
-            fs::remove_dir_all(db_path).unwrap();
-        }
-
-        {
-            // 1. Open the manager and save a file
-            let manager = FileManager::new(db_path);
-            let content = b"This is a test file for the database.";
-            manager.write_file("test.txt", content).expect("Write failed");
-
-            // Verify it exists in memory
-            let loaded = manager.read_file("test.txt").expect("Read failed");
-            assert_eq!(loaded, content);
-        } // <--- Manager is dropped here (Simulates closing the app)
-
-        println!("--- Simulating App Restart ---");
-
-        {
-            // 2. Re-open the manager (Simulate restart)
-            let manager = FileManager::new(db_path);
-
-            // 3. Try to read the file again
-            // If DB works, this should succeed. If DB fails, this returns "File not found".
-            let loaded = manager
-                .read_file("test.txt")
-                .expect("Persistence failed: File not found after restart");
-
-            assert_eq!(loaded, b"This is a test file for the database.");
-            println!("Success: Data survived the restart!");
-        }
-
-        // Cleanup
-        fs::remove_dir_all(db_path).unwrap();
-    }
-}
-
-// src/file_manager.rs (At the bottom)
-
-#[cfg(test)]
-mod integrity_tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_manager_cycle() {
-        let path = "./test_fm_db";
-        // Clean up old test data
-        if std::path::Path::new(path).exists() {
-            fs::remove_dir_all(path).unwrap();
+    fn metadata_schema_roundtrip() {
+        let path = "./test_file_manager_schema";
+        if Path::new(path).exists() {
+            fs::remove_dir_all(path).expect("cleanup failed");
         }
 
         let fm = FileManager::new(path);
-        // Create data large enough to force multiple chunks (> 4KB)
-        let data = b"A repeatable pattern for testing chunking limits...".repeat(500); // ~25KB
 
-        println!("1. Writing file via Manager...");
-        fm.write_file("test_cycle.txt", &data).expect("Manager Write Failed");
+        let recipe = FileRecipe {
+            file_size: 5,
+            chunks: vec!["abc".to_string()],
+            kind: FileKind::File,
+        };
 
-        println!("2. Reading file via Manager...");
-        let read_back = fm.read_file("test_cycle.txt").expect("Manager Read Failed");
+        fm.save_recipe(42, &recipe).expect("save recipe failed");
+        let loaded = fm
+            .load_recipe(42)
+            .expect("load recipe failed")
+            .expect("missing recipe");
+        assert_eq!(loaded.file_size, 5);
 
-        // Compare lengths first for easy debugging
-        assert_eq!(data.len(), read_back.len(), "Length mismatch!");
-        assert_eq!(data.to_vec(), read_back, "Content mismatch!");
+        fm.save_dirent(1, "hello.txt", 42)
+            .expect("save dirent failed");
+        let dirents = fm.list_dirents(1).expect("list dirents failed");
+        assert_eq!(dirents.len(), 1);
+        assert_eq!(dirents[0].name, "hello.txt");
+        assert_eq!(dirents[0].child_inode_id, 42);
 
-        println!("Success! Manager cycle works.");
-        fs::remove_dir_all(path).unwrap();
+        fm.delete_dirent(1, "hello.txt")
+            .expect("delete dirent failed");
+        let dirents_after = fm.list_dirents(1).expect("list dirents failed");
+        assert!(dirents_after.is_empty());
+
+        fs::remove_dir_all(path).expect("cleanup failed");
     }
 }

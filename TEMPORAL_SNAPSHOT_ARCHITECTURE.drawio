@@ -1,0 +1,320 @@
+<mxfile host="65bd71144e">
+    <diagram id="TSS-Architecture" name="Temporal Snapshot System">
+        <mxGraphModel dx="936" dy="670" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1400" pageHeight="1000" background="none" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="memory-group" value="Memory Layer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontSize=14;fontStyle=1;align=center;spacingLeft=10;spacingTop=5;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="480.02" y="460" width="280" height="340" as="geometry"/>
+                </mxCell>
+                <mxCell id="inode-tree" value="Inode Tree&lt;br&gt;Arc&amp;lt;RwLock&amp;lt;Inode&amp;gt;&amp;gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#b1ddf0;strokeColor=#10739e;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="510.02" y="500" width="220" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="inode-registry" value="Inode Registry&lt;br&gt;HashMap&amp;lt;u64, Arc&amp;gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#b1ddf0;strokeColor=#10739e;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="510" y="710" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="snapshot-registry" value="Snapshot Registry&lt;br&gt;HashMap&amp;lt;Name, Root&amp;gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#b1ddf0;strokeColor=#10739e;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="510" y="620" width="220" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="concurrency-group" value="Concurrency Layer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;fontSize=14;fontStyle=1;align=center;spacingLeft=10;spacingTop=5;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="800.02" y="640" width="259.98" height="160" as="geometry"/>
+                </mxCell>
+                <mxCell id="rwlock" value="RwLock Guard&lt;br&gt;RwLock&amp;lt;Inode&amp;gt;&lt;br&gt;Multi-reader/Single-writer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5b5e3;strokeColor=#8e44ad;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="810.01" y="680" width="239.99" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="arc-counting" value="Arc Counting&lt;br&gt;Reference Counting&lt;br&gt;strong_count tracker" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5b5e3;strokeColor=#8e44ad;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="810" y="740" width="240" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="cow-group" value="Copy-on-Write Engine" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;fontSize=14;fontStyle=1;align=center;spacingLeft=10;spacingTop=5;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="800.02" y="400" width="259.98" height="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="path-cloner" value="Path Cloner&lt;br&gt;Deep Clone + ID Reassignment" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffd9a8;strokeColor=#d79b00;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="960" y="480" width="90" height="130" as="geometry"/>
+                </mxCell>
+                <mxCell id="divergence" value="Divergence Handler&lt;br&gt;Split Live/Snapshot" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffd9a8;strokeColor=#d79b00;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="810.01" y="560" width="109.99" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="persistence-group" value="Persistence Layer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontSize=14;fontStyle=1;align=center;spacingLeft=10;spacingTop=5;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="199.99" y="460" width="240.02" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="sled" value="Sled DB&lt;br&gt;Metadata Store" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#666666;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="210" y="550" width="220" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="cas" value="CAS Store&lt;br&gt;Content-Addressable Chunks" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e8e8e8;strokeColor=#666666;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="210.01" y="500" width="220" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="gc-group" value="Garbage Collection" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;fontSize=14;fontStyle=1;align=left;spacingLeft=10;spacingTop=5;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="630" width="240.02" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="drop-handler" value="Drop Handler&lt;br&gt;Arc Drop Detection" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5b7b1;strokeColor=#c0392b;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="210" y="750" width="220" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="cascade" value="Cascade Cleanup&lt;br&gt;Recursive Dealloc" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5b7b1;strokeColor=#c0392b;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="210" y="670" width="220" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="algo-box" value="&lt;b&gt;Algorithm Details&lt;/b&gt;&lt;br&gt;• CoW Trigger: Arc::strong_count &amp;gt; 1&lt;br&gt;• Snapshot Create: O(1) - 8 bytes&lt;br&gt;• First Write: O(depth) ≈ O(log n)&lt;br&gt;• Read Overhead: Zero&lt;br&gt;• GC: Automatic ref counting" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;align=left;verticalAlign=top;spacingLeft=10;spacingTop=5;" parent="1" vertex="1">
+                    <mxGeometry x="150.01" y="1080" width="229.99" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-title" value="Copy-on-Write Flow" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=16;fontStyle=1" parent="1" vertex="1">
+                    <mxGeometry x="120" y="950" width="920" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-write" value="Write Request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffcccc;strokeColor=#cc0000;" parent="1" vertex="1">
+                    <mxGeometry x="140" y="1000" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-lookup" value="Inode Lookup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#cce5ff;strokeColor=#0066cc;" parent="1" vertex="1">
+                    <mxGeometry x="290" y="1000" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-check" value="strong_count &amp;gt; 1?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" parent="1" vertex="1">
+                    <mxGeometry x="450" y="985" width="120" height="70" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-clone" value="Clone Path&lt;br&gt;Root → Target" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="1" vertex="1">
+                    <mxGeometry x="610" y="1000" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-reassign" value="Reassign IDs&lt;br&gt;Update Parents" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" parent="1" vertex="1">
+                    <mxGeometry x="760" y="1000" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-write-final" value="Write Data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ccffcc;strokeColor=#00cc00;" parent="1" vertex="1">
+                    <mxGeometry x="910" y="1000" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-direct" value="Direct Write&lt;br&gt;(not shared)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ccffcc;strokeColor=#00cc00;" parent="1" vertex="1">
+                    <mxGeometry x="610" y="1090" width="120" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#2980b9;" parent="1" source="inode-tree" target="snapshot-registry" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="620" y="610"/>
+                            <mxPoint x="620" y="610"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow1-label" value="Arc::clone(&amp;root) O(1)" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow1" vertex="1" connectable="0">
+                    <mxGeometry x="-0.2" y="2" relative="1" as="geometry">
+                        <mxPoint x="68" y="3" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#8e44ad;" parent="1" source="arc-counting" target="snapshot-registry" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow2-label" value="Increment ref_count" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow2" vertex="1" connectable="0">
+                    <mxGeometry x="0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="-9" y="33" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#e74c3c;" parent="1" source="inode-tree" target="ref-checker" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="780" y="550"/>
+                            <mxPoint x="780" y="505"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow3-label" value="Write request" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow3" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="-19" y="-52" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#d79b00;entryX=-0.002;entryY=0.226;entryDx=0;entryDy=0;entryPerimeter=0;" parent="1" source="ref-checker" target="path-cloner" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="940" y="510"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow4-label" value="IF strong_count &amp;gt; 1" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow4" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="32" y="-19" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00;" parent="1" source="ref-checker" target="divergence" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="865" y="540"/>
+                            <mxPoint x="865" y="540"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#27ae60;" parent="1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="790" y="600"/>
+                            <mxPoint x="790" y="563"/>
+                        </Array>
+                        <mxPoint x="810" y="600" as="sourcePoint"/>
+                        <mxPoint x="730" y="563" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow6-label" value="Update live tree" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;labelBackgroundColor=default;" parent="arrow6" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="-39" y="9" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#8e44ad;dashed=1;" parent="1" source="rwlock" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="730" y="590" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="770" y="705"/>
+                            <mxPoint x="770" y="590"/>
+                            <mxPoint x="730" y="590"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow7-label" value="Protects mutations" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow7" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint y="-9" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" parent="1" source="inode-tree" target="sled" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="490" y="560"/>
+                            <mxPoint x="490" y="560"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow8-label" value="Persist metadata" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow8" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="36" y="-16" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;" parent="1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="460" y="630"/>
+                            <mxPoint x="460" y="570"/>
+                            <mxPoint x="430" y="570"/>
+                        </Array>
+                        <mxPoint x="510" y="630" as="sourcePoint"/>
+                        <mxPoint x="430" y="570" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow9-label" value="Save snapshot index" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow9" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="51" y="23" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#666666;" parent="1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="510" y="510"/>
+                        </Array>
+                        <mxPoint x="510" y="510" as="sourcePoint"/>
+                        <mxPoint x="430" y="510" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow10-label" value="Write chunks" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow10" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="6" y="-21" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#c0392b;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" parent="1" target="drop-handler" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="450" y="580"/>
+                            <mxPoint x="450" y="760"/>
+                        </Array>
+                        <mxPoint x="510" y="580" as="sourcePoint"/>
+                        <mxPoint x="210" y="760" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow11-label" value="unlink() / delete" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow11" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="69" y="-37" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;strokeColor=#c0392b;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" parent="1" source="snapshot-registry" target="drop-handler" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="470" y="665"/>
+                            <mxPoint x="470" y="780"/>
+                        </Array>
+                        <mxPoint x="210" y="780" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow12-label" value="Remove snapshot" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow12" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="9" y="77" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#c0392b;" parent="1" source="drop-handler" target="cascade" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="arrow13-label" value="IF strong_count == 0" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow13" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="25" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.808;entryY=0.996;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#c0392b;entryPerimeter=0;" parent="1" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="388" y="670.1600000000001" as="sourcePoint"/>
+                        <mxPoint x="387.77" y="599.9999999999999" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="388" y="650.16"/>
+                            <mxPoint x="388" y="650.16"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="arrow14-label" value="Delete orphaned chunks" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="arrow14" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="-67" y="-24" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="flow-arrow1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="flow-write" target="flow-lookup" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="flow-lookup" target="flow-check" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-arrow3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="flow-check" target="flow-clone" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-arrow3-label" value="YES" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="flow-arrow3" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint y="-9" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="flow-arrow4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="flow-check" target="flow-direct" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="510" y="1110"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="flow-arrow4-label" value="NO" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="flow-arrow4" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="-10" y="10" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="flow-arrow5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="flow-clone" target="flow-reassign" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-arrow6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="flow-reassign" target="flow-write-final" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="flow-arrow7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;strokeWidth=2;" parent="1" source="flow-direct" target="flow-write-final" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="970" y="1110"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeWidth=2;strokeColor=#d79b00;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" parent="1" source="path-cloner" target="ref-checker" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <mxPoint x="950" y="550" as="sourcePoint"/>
+                        <mxPoint x="865" y="560" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="4" value="Clone shared path" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=11;" parent="3" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="13" y="-12" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="ref-checker" value="Reference Checker&lt;br&gt;Check strong_count" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffd9a8;strokeColor=#d79b00;glass=0;shadow=0;" parent="1" vertex="1">
+                    <mxGeometry x="810.01" y="480" width="109.99" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="5" value="&lt;span style=&quot;color: rgb(0, 0, 0); font-family: Helvetica; font-size: 20px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 700; letter-spacing: normal; orphans: 2; text-align: center; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; background-color: rgb(251, 251, 251); text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; float: none; display: inline !important;&quot;&gt;Temporal Snapshot System - Technical Architecture&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;shadow=1;strokeWidth=3;" parent="1" vertex="1">
+                    <mxGeometry x="200" y="400" width="590" height="50" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>
