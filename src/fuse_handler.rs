@@ -15,7 +15,7 @@ use fuser::{
     Request,
 };
 use libc::{EEXIST, EINVAL, ENOENT, EROFS};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::sync::atomic::{ AtomicU64, Ordering };
 use std::sync::{ Arc, RwLock };
@@ -25,6 +25,7 @@ const TTL: Duration = Duration::from_secs(1);
 const FUSE_ROOT_ID: u64 = 1;
 const SNAPSHOT_DIR_ID: u64 = 2;
 const SNAPSHOT_CREATE_ID: u64 = 3;
+const PAGE_CACHE_CAPACITY: usize = 1024;
 
 // ===========================================================================
 // 1. DATA STRUCTURES
@@ -100,6 +101,8 @@ pub struct BetterFS {
     pub root: Arc<RwLock<Inode>>,
     pub snapshots: Arc<RwLock<HashMap<String, Snapshot>>>,
     pub page_cache: Arc<RwLock<HashMap<u64, (Vec<u8>, bool)>>>,
+    pub cache_lru: Arc<RwLock<VecDeque<u64>>>,
+    pub cache_capacity: usize,
     next_inode: AtomicU64,
 }
 
@@ -115,6 +118,8 @@ impl BetterFS {
             root,
             snapshots: Arc::new(RwLock::new(HashMap::new())),
             page_cache: Arc::new(RwLock::new(HashMap::new())),
+            cache_lru: Arc::new(RwLock::new(VecDeque::new())),
+            cache_capacity: PAGE_CACHE_CAPACITY,
             next_inode: AtomicU64::new(100),
         };
 
@@ -402,6 +407,7 @@ impl BetterFS {
         }
 
         self.page_cache.write().unwrap().clear();
+        self.cache_lru.write().unwrap().clear();
 
         {
             let root_guard = self.root.read().unwrap();
@@ -438,19 +444,66 @@ impl BetterFS {
 
     fn read_cached_or_load(&self, ino: u64) -> Result<Vec<u8>, String> {
         if let Some((data, _dirty)) = self.page_cache.read().unwrap().get(&ino).cloned() {
+            self.touch_cache_entry(ino);
             return Ok(data);
         }
 
         let data = self.manager.read_file_by_id(ino).unwrap_or_default();
-        self.page_cache
-            .write()
-            .unwrap()
-            .insert(ino, (data.clone(), false));
+        self.write_to_cache(ino, data.clone(), false)?;
         Ok(data)
     }
 
-    fn write_to_cache(&self, ino: u64, data: Vec<u8>, is_dirty: bool) {
+    fn write_to_cache(&self, ino: u64, data: Vec<u8>, is_dirty: bool) -> Result<(), String> {
         self.page_cache.write().unwrap().insert(ino, (data, is_dirty));
+        self.touch_cache_entry(ino);
+        self.evict_under_pressure()
+    }
+
+    fn touch_cache_entry(&self, ino: u64) {
+        let mut lru = self.cache_lru.write().unwrap();
+        if let Some(pos) = lru.iter().position(|id| *id == ino) {
+            lru.remove(pos);
+        }
+        lru.push_back(ino);
+    }
+
+    fn evict_under_pressure(&self) -> Result<(), String> {
+        loop {
+            let cache_len = self.page_cache.read().unwrap().len();
+            if cache_len <= self.cache_capacity {
+                return Ok(());
+            }
+
+            let victim = {
+                let mut lru = self.cache_lru.write().unwrap();
+                let mut victim = None;
+                while let Some(candidate) = lru.pop_front() {
+                    if self.page_cache.read().unwrap().contains_key(&candidate) {
+                        victim = Some(candidate);
+                        break;
+                    }
+                }
+                victim
+            };
+
+            let Some(victim_ino) = victim else {
+                return Ok(());
+            };
+
+            let is_dirty = self
+                .page_cache
+                .read()
+                .unwrap()
+                .get(&victim_ino)
+                .map(|(_, dirty)| *dirty)
+                .unwrap_or(false);
+
+            if is_dirty {
+                self.flush_inode_cache(victim_ino)?;
+            }
+
+            self.page_cache.write().unwrap().remove(&victim_ino);
+        }
     }
 
     fn flush_inode_cache(&self, ino: u64) -> Result<(), String> {
@@ -474,6 +527,7 @@ impl BetterFS {
                 .write()
                 .unwrap()
                 .insert(ino, (buffer, false));
+            self.touch_cache_entry(ino);
         }
 
         Ok(())
@@ -489,6 +543,7 @@ impl BetterFS {
 
     fn evict_inode_cache(&self, ino: u64) {
         self.page_cache.write().unwrap().remove(&ino);
+        self.cache_lru.write().unwrap().retain(|id| *id != ino);
     }
 
 
@@ -927,7 +982,9 @@ impl Filesystem for BetterFS {
         file_data[offset as usize..end].copy_from_slice(data);
 
         // 3. Write-back cache: mark dirty and return success
-        self.write_to_cache(ino, file_data.clone(), true);
+        if self.write_to_cache(ino, file_data.clone(), true).is_err() {
+            return reply.error(libc::EIO);
+        }
 
         if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino) {
             let mut node = node_arc.write().unwrap();
@@ -1133,7 +1190,9 @@ impl Filesystem for BetterFS {
             let mut file_data = self.read_cached_or_load(ino).unwrap_or_default();
             file_data.resize(new_size as usize, 0);
 
-            self.write_to_cache(ino, file_data, true);
+            if self.write_to_cache(ino, file_data, true).is_err() {
+                return reply.error(libc::EIO);
+            }
 
             if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino) {
                 let mut node = node_arc.write().unwrap();
@@ -1149,6 +1208,21 @@ impl Filesystem for BetterFS {
 
     fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         reply.opened(0, 0);
+    }
+
+    fn fsync(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _fh: u64,
+        _datasync: bool,
+        reply: ReplyEmpty,
+    ) {
+        if self.flush_inode_cache(ino).is_ok() {
+            reply.ok();
+        } else {
+            reply.error(libc::EIO);
+        }
     }
 
     fn release(
