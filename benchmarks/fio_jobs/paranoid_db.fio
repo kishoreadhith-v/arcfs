@@ -1,0 +1,7 @@
+[paranoid_db]
+rw=randwrite
+bs=4k
+size=500M
+fsync=1
+direct=1
+fallocate=none

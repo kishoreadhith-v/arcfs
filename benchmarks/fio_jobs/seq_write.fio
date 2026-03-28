@@ -1,0 +1,6 @@
+[seq_write]
+rw=write
+bs=1M
+size=2G
+direct=1
+fallocate=none

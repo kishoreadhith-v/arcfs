@@ -1,0 +1,7 @@
+[rand_write]
+rw=randwrite
+bs=4K
+size=1G
+iodepth=32
+direct=1
+fallocate=none

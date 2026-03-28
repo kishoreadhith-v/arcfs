@@ -1,0 +1,7 @@
+[realistic_mix]
+rw=randrw
+rwmixread=70
+bssplit=4k/50:64k/30:1m/20
+size=1G
+direct=1
+fallocate=none

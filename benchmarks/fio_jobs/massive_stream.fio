@@ -1,0 +1,7 @@
+[massive_stream]
+rw=write
+size=4G
+buffer_compress_percentage=0
+refill_buffers=1
+direct=1
+fallocate=none
