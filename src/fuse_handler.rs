@@ -464,6 +464,12 @@ impl BetterFS {
 
         if let Some(buffer) = dirty_data {
             self.manager.write_file_by_id(ino, &buffer)?;
+
+            if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino).cloned() {
+                let node = node_arc.read().unwrap();
+                self.manager.save_inode(&node)?;
+            }
+
             self.page_cache
                 .write()
                 .unwrap()
@@ -928,7 +934,6 @@ impl Filesystem for BetterFS {
             node.attr.size = file_data.len() as u64;
             node.attr.blocks = node.attr.size.div_ceil(512);
             node.attr.mtime = SystemTime::now();
-            let _ = self.manager.save_inode(&node);
         }
 
         reply.written(data.len() as u32);
@@ -1135,7 +1140,6 @@ impl Filesystem for BetterFS {
                 node.attr.size = new_size;
                 node.attr.blocks = new_size.div_ceil(512);
                 node.attr.mtime = SystemTime::now();
-                let _ = self.manager.save_inode(&node);
             }
         }
         

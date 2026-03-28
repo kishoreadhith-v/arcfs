@@ -1,11 +1,8 @@
 // src/main.rs
-mod chunker;
-mod file_manager;
-mod fuse_handler;
-mod storage;
-
 use clap::{ Parser, Subcommand };
-use file_manager::FileManager;
+use better_fs::chunker::chunk_lengths;
+use better_fs::file_manager::{FileKind, FileManager};
+use better_fs::fuse_handler;
 use std::fs;
 use std::io::Write; // Needed for flushing output
 use std::path::PathBuf;
@@ -42,6 +39,20 @@ enum Commands {
     Inspect,
     /// Run Garbage Collection to remove unused chunks
     Gc,
+    /// Analyze CDC chunk distribution for a file
+    CdcStats {
+        /// File path to analyze
+        file_path: PathBuf,
+    },
+}
+
+fn percentile(sorted: &[usize], p: f64) -> usize {
+    if sorted.is_empty() {
+        return 0;
+    }
+
+    let rank = ((sorted.len() - 1) as f64 * p).round() as usize;
+    sorted[rank.min(sorted.len() - 1)]
 }
 
 fn main() {
@@ -118,8 +129,8 @@ fn main() {
             for (key, parsed_recipe) in manager.inspect_records() {
                 if let Some(recipe) = parsed_recipe {
                     let kind_str = match recipe.kind {
-                        file_manager::FileKind::Directory => "DIR",
-                        file_manager::FileKind::File => "FILE",
+                        FileKind::Directory => "DIR",
+                        FileKind::File => "FILE",
                     };
                     println!(
                         "[{}] {} \t(Size: {} bytes, Chunks: {})",
@@ -140,6 +151,40 @@ fn main() {
             match manager.run_gc() {
                 Ok(count) => println!("Successfully removed {} orphaned chunks.", count),
                 Err(e) => eprintln!("GC Failed: {}", e),
+            },
+
+        Commands::CdcStats { file_path } => {
+            let data = match fs::read(&file_path) {
+                Ok(content) => content,
+                Err(e) => {
+                    eprintln!("Error: Could not read file '{:?}': {}", file_path, e);
+                    return;
+                }
+            };
+
+            let sizes = chunk_lengths(&data);
+            if sizes.is_empty() {
+                println!("No chunks produced (input file is empty).");
+                return;
             }
+
+            let mut sorted = sizes.clone();
+            sorted.sort_unstable();
+
+            let total_bytes: usize = sizes.iter().sum();
+            let avg = total_bytes as f64 / sizes.len() as f64;
+            let min = *sorted.first().unwrap_or(&0);
+            let max = *sorted.last().unwrap_or(&0);
+
+            println!("CDC Stats for {:?}", file_path);
+            println!("- bytes: {}", data.len());
+            println!("- chunks: {}", sizes.len());
+            println!("- avg: {:.2}", avg);
+            println!("- min: {}", min);
+            println!("- p50: {}", percentile(&sorted, 0.50));
+            println!("- p90: {}", percentile(&sorted, 0.90));
+            println!("- p99: {}", percentile(&sorted, 0.99));
+            println!("- max: {}", max);
+        }
     }
 }

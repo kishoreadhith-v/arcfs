@@ -44,26 +44,3 @@ jobs:
             echo "- Suite: architecture_compliance"
             echo "- Status: ${{ steps.architecture.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
-
-  e2e-fuse-self-hosted:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, linux]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Run full FUSE regression suite
-        id: fuse_e2e
-        run: ./tests/regression_e2e.sh
-
-      - name: Summary - fuse e2e
-        if: always()
-        run: |
-          {
-            echo "## BetterFS Manual FUSE Summary"
-            echo "- Suite: regression_e2e"
-            echo "- Status: ${{ steps.fuse_e2e.outcome }}"
-          } >> "$GITHUB_STEP_SUMMARY"

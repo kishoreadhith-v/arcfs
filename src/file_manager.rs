@@ -441,9 +441,31 @@ impl FileManager {
     #[allow(dead_code)]
     pub fn delete_file(&self, filename: &str) -> Result<(), String> {
         let legacy_key = Self::get_legacy_key(filename);
+        let inode_id = self
+            .db
+            .get(legacy_key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?
+            .map(|bytes| {
+                bincode::deserialize::<u64>(&bytes)
+                    .map_err(|e| format!("Legacy inode deserialization error: {}", e))
+            })
+            .transpose()?;
+
         self.db
             .remove(legacy_key.as_bytes())
             .map_err(|e| format!("Database error: {}", e))?;
+
+        if let Some(id) = inode_id {
+            let recipe_key = Self::recipe_key(id);
+            let inode_key = Self::inode_key(id);
+            self.db
+                .remove(recipe_key.as_bytes())
+                .map_err(|e| format!("Database error: {}", e))?;
+            self.db
+                .remove(inode_key.as_bytes())
+                .map_err(|e| format!("Database error: {}", e))?;
+        }
+
         self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
         Ok(())
     }

@@ -1,13 +1,6 @@
 // tests/backend_stress.rs
 
-#[path = "../src/chunker.rs"]
-mod chunker;
-#[path = "../src/file_manager.rs"]
-mod file_manager;
-#[path = "../src/storage.rs"]
-mod storage;
-
-use file_manager::FileManager;
+use better_fs::file_manager::FileManager;
 use std::fs;
 use std::path::Path;
 
@@ -44,18 +37,18 @@ fn test_2_tiny_file() {
 
 #[test]
 fn test_3_persistence_check() {
-    let TEST_DB = "./test_db_3";
+    let test_db = "./test_db_3";
     // This replaces the old deduplication test.
     // We want to prove that data survives if we "Restart" the manager.
 
     // 1. Write a file
     {
-        let manager = setup(TEST_DB);
+        let manager = setup(test_db);
         manager.write_file("resume.pdf", b"Important Data").unwrap();
     } // Manager is dropped here (Database closes)
 
     // 2. Re-open (Simulate Restart)
-    let manager = FileManager::new(TEST_DB);
+    let manager = FileManager::new(test_db);
 
     // 3. Read it back
     let data = manager
@@ -66,8 +59,8 @@ fn test_3_persistence_check() {
 
 #[test]
 fn test_4_large_file_stress() {
-    let TEST_DB = "./test_db_4";
-    let manager = setup(TEST_DB);
+    let test_db = "./test_db_4";
+    let manager = setup(test_db);
 
     // Generate 1MB of pseudo-random data
     let data: Vec<u8> = (0u32..1024 * 1024)
@@ -89,8 +82,8 @@ fn test_4_large_file_stress() {
 
 #[test]
 fn test_5_missing_file() {
-    let TEST_DB = "./test_db_5";
-    let manager = setup(TEST_DB);
+    let test_db = "./test_db_5";
+    let manager = setup(test_db);
     // Try to read a file that doesn't exist
     let result = manager.read_file("ghost.txt");
 

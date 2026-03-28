@@ -1,15 +1,6 @@
 // tests/gc_test.rs
 
-// --- MODULE HACKS (To access your src code from a test file) ---
-#[path = "../src/chunker.rs"]
-mod chunker;
-#[path = "../src/file_manager.rs"]
-mod file_manager;
-#[path = "../src/storage.rs"]
-mod storage;
-// --------------------------------------------------------------
-
-use file_manager::FileManager;
+use better_fs::file_manager::FileManager;
 use std::fs;
 use std::path::Path;
 
