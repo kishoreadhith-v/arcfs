@@ -14,7 +14,7 @@ use fuser::{
     ReplyWrite,
     Request,
 };
-use libc::{EEXIST, EINVAL, ENOENT, EROFS};
+use libc::{EEXIST, EINVAL, EISDIR, ENOENT, EROFS};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsStr;
 use std::sync::atomic::{ AtomicU64, Ordering };
@@ -25,7 +25,10 @@ const TTL: Duration = Duration::from_secs(1);
 const FUSE_ROOT_ID: u64 = 1;
 const SNAPSHOT_DIR_ID: u64 = 2;
 const SNAPSHOT_CREATE_ID: u64 = 3;
+const TAGS_DIR_ID: u64 = 4;
+const TAGFS_CONTROL_ID: u64 = 5;
 const PAGE_CACHE_CAPACITY: usize = 1024;
+const VIRTUAL_INODE_START: u64 = 1_000_000;
 
 // ===========================================================================
 // 1. DATA STRUCTURES
@@ -66,6 +69,16 @@ pub struct Snapshot {
     pub root: Arc<RwLock<Inode>>,
 }
 
+#[derive(Clone)]
+pub struct TagVirtualDirContext {
+    pub tags: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct TagVirtualFileContext {
+    pub real_inode_id: u64,
+}
+
 fn dir_attr(ino: u64) -> FileAttr {
     FileAttr {
         ino,
@@ -95,6 +108,15 @@ fn snapshot_create_attr() -> FileAttr {
     attr
 }
 
+fn tagfs_control_attr() -> FileAttr {
+    let mut attr = dir_attr(TAGFS_CONTROL_ID);
+    attr.kind = FileType::RegularFile;
+    attr.perm = 0o644;
+    attr.nlink = 1;
+    attr.size = 0;
+    attr
+}
+
 pub struct BetterFS {
     pub manager: FileManager,
     pub inode_registry: Arc<RwLock<HashMap<u64, Arc<RwLock<Inode>>>>>,
@@ -103,6 +125,11 @@ pub struct BetterFS {
     pub page_cache: Arc<RwLock<HashMap<u64, (Vec<u8>, bool)>>>,
     pub cache_lru: Arc<RwLock<VecDeque<u64>>>,
     pub cache_capacity: usize,
+    pub tag_virtual_dirs: Arc<RwLock<HashMap<u64, TagVirtualDirContext>>>,
+    pub tag_virtual_files: Arc<RwLock<HashMap<u64, TagVirtualFileContext>>>,
+    pub tag_dir_ids_by_key: Arc<RwLock<HashMap<String, u64>>>,
+    pub tag_file_ids_by_key: Arc<RwLock<HashMap<String, u64>>>,
+    next_vnode: AtomicU64,
     next_inode: AtomicU64,
 }
 
@@ -120,6 +147,11 @@ impl BetterFS {
             page_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_lru: Arc::new(RwLock::new(VecDeque::new())),
             cache_capacity: PAGE_CACHE_CAPACITY,
+            tag_virtual_dirs: Arc::new(RwLock::new(HashMap::new())),
+            tag_virtual_files: Arc::new(RwLock::new(HashMap::new())),
+            tag_dir_ids_by_key: Arc::new(RwLock::new(HashMap::new())),
+            tag_file_ids_by_key: Arc::new(RwLock::new(HashMap::new())),
+            next_vnode: AtomicU64::new(VIRTUAL_INODE_START),
             next_inode: AtomicU64::new(100),
         };
 
@@ -692,11 +724,386 @@ impl BetterFS {
 
         None
     }
+
+    fn canonicalize_tags(&self, tags: Vec<String>) -> Vec<String> {
+        let mut out = Vec::new();
+        for tag in tags {
+            let normalized = tag.trim().to_lowercase();
+            if !normalized.is_empty() && !out.contains(&normalized) {
+                out.push(normalized);
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn tag_key(&self, tags: &[String]) -> String {
+        tags.join("/")
+    }
+
+    fn tag_file_key(&self, tags: &[String], real_inode_id: u64) -> String {
+        format!("{}|{}", self.tag_key(tags), real_inode_id)
+    }
+
+    fn is_tag_virtual_dir_inode(&self, ino: u64) -> bool {
+        ino == TAGS_DIR_ID || self.tag_virtual_dirs.read().unwrap().contains_key(&ino)
+    }
+
+    fn is_tag_virtual_file_inode(&self, ino: u64) -> bool {
+        self.tag_virtual_files.read().unwrap().contains_key(&ino)
+    }
+
+    fn tag_dir_attr(&self, ino: u64) -> FileAttr {
+        let mut attr = dir_attr(ino);
+        attr.perm = 0o755;
+        attr
+    }
+
+    fn existing_tag_virtual_dir(&self, tags: &[String]) -> Option<u64> {
+        let canonical = self.canonicalize_tags(tags.to_vec());
+        let key = self.tag_key(&canonical);
+        self.tag_dir_ids_by_key.read().unwrap().get(&key).copied()
+    }
+
+    fn get_or_create_tag_virtual_dir(&self, tags: &[String]) -> u64 {
+        let canonical = self.canonicalize_tags(tags.to_vec());
+        let key = self.tag_key(&canonical);
+
+        if let Some(existing) = self.tag_dir_ids_by_key.read().unwrap().get(&key).copied() {
+            return existing;
+        }
+
+        let virtual_ino = self.next_vnode.fetch_add(1, Ordering::Relaxed);
+        self.tag_virtual_dirs.write().unwrap().insert(
+            virtual_ino,
+            TagVirtualDirContext {
+                tags: canonical.clone(),
+            },
+        );
+        self.tag_dir_ids_by_key
+            .write()
+            .unwrap()
+            .insert(key, virtual_ino);
+        virtual_ino
+    }
+
+    fn get_or_create_tag_virtual_file(&self, tags: &[String], real_inode_id: u64) -> u64 {
+        let canonical = self.canonicalize_tags(tags.to_vec());
+        let key = self.tag_file_key(&canonical, real_inode_id);
+
+        if let Some(existing) = self.tag_file_ids_by_key.read().unwrap().get(&key).copied() {
+            return existing;
+        }
+
+        let virtual_ino = self.next_vnode.fetch_add(1, Ordering::Relaxed);
+        self.tag_virtual_files.write().unwrap().insert(
+            virtual_ino,
+            TagVirtualFileContext { real_inode_id },
+        );
+        self.tag_file_ids_by_key
+            .write()
+            .unwrap()
+            .insert(key, virtual_ino);
+        virtual_ino
+    }
+
+    fn get_virtual_dir_tags(&self, ino: u64) -> Option<Vec<String>> {
+        self.tag_virtual_dirs
+            .read()
+            .unwrap()
+            .get(&ino)
+            .map(|ctx| ctx.tags.clone())
+    }
+
+    fn ensure_real_path_for_tags(&mut self, tags: &[String]) -> Result<u64, i32> {
+        let canonical = self.canonicalize_tags(tags.to_vec());
+        let mut current_parent = FUSE_ROOT_ID;
+
+        for tag in canonical {
+            let parent_arc = {
+                let registry = self.inode_registry.read().unwrap();
+                registry.get(&current_parent).cloned().ok_or(ENOENT)?
+            };
+
+            let mut parent_guard = parent_arc.write().unwrap();
+            if let Some(existing_child) = parent_guard.children.get(&tag).cloned() {
+                let child_guard = existing_child.read().unwrap();
+                if child_guard.attr.kind != FileType::Directory {
+                    return Err(EINVAL);
+                }
+                current_parent = child_guard.id;
+                continue;
+            }
+
+            let new_id = self.generate_id();
+            let mut new_inode = Inode::new(new_id, FileType::Directory);
+            new_inode.name = tag.clone();
+            new_inode.parent_id = current_parent;
+
+            if self.manager.save_inode(&new_inode).is_err() {
+                return Err(libc::EIO);
+            }
+            if self.manager.save_dirent(current_parent, &tag, new_id).is_err() {
+                return Err(libc::EIO);
+            }
+
+            let new_arc = Arc::new(RwLock::new(new_inode));
+            self.inode_registry.write().unwrap().insert(new_id, new_arc.clone());
+            parent_guard.children.insert(tag, new_arc);
+            current_parent = new_id;
+        }
+
+        Ok(current_parent)
+    }
+
+    fn create_live_file_under_parent(&mut self, parent: u64, name: &str) -> Result<u64, i32> {
+        let new_id = self.generate_id();
+
+        let mut new_inode = Inode::new(new_id, FileType::RegularFile);
+        new_inode.name = name.to_string();
+        new_inode.parent_id = parent;
+
+        if self.manager.save_inode(&new_inode).is_err() {
+            return Err(libc::EIO);
+        }
+        if self.manager.save_dirent(parent, name, new_id).is_err() {
+            return Err(libc::EIO);
+        }
+
+        let recipe = FileRecipe {
+            file_size: 0,
+            chunks: vec![],
+            kind: FileKind::File,
+        };
+        if self.manager.save_recipe(new_id, &recipe).is_err() {
+            return Err(libc::EIO);
+        }
+
+        let auto_tags = self.derive_tags_from_parent_ancestry(parent);
+        if !auto_tags.is_empty() {
+            let _ = self.manager.set_file_tags(new_id, name, auto_tags);
+        }
+
+        let new_arc = Arc::new(RwLock::new(new_inode));
+        if let Some(parent_node) = self.inode_registry.read().unwrap().get(&parent) {
+            parent_node
+                .write()
+                .unwrap()
+                .children
+                .insert(name.to_string(), new_arc.clone());
+        } else {
+            return Err(ENOENT);
+        }
+        self.inode_registry.write().unwrap().insert(new_id, new_arc);
+        Ok(new_id)
+    }
+
+    fn resolve_real_file_in_tag_dir(&self, parent_virtual: u64, name: &str) -> Result<u64, i32> {
+        let Some(tags) = self.get_virtual_dir_tags(parent_virtual) else {
+            return Err(ENOENT);
+        };
+
+        let candidates = self.manager.get_files_by_tags(&tags).map_err(|_| libc::EIO)?;
+        let mut matches = Vec::new();
+        for inode_id in candidates {
+            if let Some(inode_name) = self.lookup_live_inode_name(inode_id)
+                && inode_name == name
+            {
+                matches.push(inode_id);
+            }
+        }
+
+        match matches.len() {
+            0 => Err(ENOENT),
+            1 => Ok(matches[0]),
+            _ => Err(EINVAL),
+        }
+    }
+
+    fn real_inode_for_virtual_file(&self, virtual_ino: u64) -> Option<u64> {
+        self.tag_virtual_files
+            .read()
+            .unwrap()
+            .get(&virtual_ino)
+            .map(|ctx| ctx.real_inode_id)
+    }
+
+    fn derive_tags_from_parent_ancestry(&self, parent_inode_id: u64) -> Vec<String> {
+        let mut tags = Vec::new();
+        let mut current = parent_inode_id;
+
+        while current != FUSE_ROOT_ID && current != 0 {
+            match self.manager.load_inode(current) {
+                Ok(Some(meta)) => {
+                    if !meta.name.is_empty() {
+                        tags.push(meta.name);
+                    }
+                    current = meta.parent_id;
+                }
+                _ => {
+                    let registry = self.inode_registry.read().unwrap();
+                    if let Some(node_arc) = registry.get(&current) {
+                        let node = node_arc.read().unwrap();
+                        if !node.name.is_empty() {
+                            tags.push(node.name.clone());
+                        }
+                        current = node.parent_id;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        tags.reverse();
+        tags
+    }
+
+    fn lookup_live_inode_name(&self, inode_id: u64) -> Option<String> {
+        self.inode_registry
+            .read()
+            .unwrap()
+            .get(&inode_id)
+            .map(|node| node.read().unwrap().name.clone())
+    }
+
+    fn lookup_live_inode_parent(&self, inode_id: u64) -> Option<u64> {
+        self.inode_registry
+            .read()
+            .unwrap()
+            .get(&inode_id)
+            .map(|node| node.read().unwrap().parent_id)
+    }
+
+    fn lookup_live_inode_attr(&self, inode_id: u64) -> Option<FileAttr> {
+        self.inode_registry
+            .read()
+            .unwrap()
+            .get(&inode_id)
+            .map(|node| node.read().unwrap().attr)
+    }
+
+    fn resolve_tag_lookup(&self, parent: u64, name: &str) -> Result<Option<(u64, FileAttr)>, i32> {
+        if parent == FUSE_ROOT_ID && name == "@tags" {
+            return Ok(Some((TAGS_DIR_ID, self.tag_dir_attr(TAGS_DIR_ID))));
+        }
+
+        if parent == TAGS_DIR_ID {
+            let files = self
+                .manager
+                .get_files_with_tag(name)
+                .map_err(|_| libc::EIO)?;
+
+            if files.is_empty() {
+                let tags = vec![name.to_string()];
+                if let Some(existing) = self.existing_tag_virtual_dir(&tags) {
+                    return Ok(Some((existing, self.tag_dir_attr(existing))));
+                }
+                return Ok(None);
+            }
+
+            let tags = vec![name.to_string()];
+            let virtual_ino = self.get_or_create_tag_virtual_dir(&tags);
+            return Ok(Some((virtual_ino, self.tag_dir_attr(virtual_ino))));
+        }
+
+        if let Some(current_tags) = self.get_virtual_dir_tags(parent) {
+            let mut next_tags = current_tags.clone();
+            next_tags.push(name.to_string());
+            let next_tags = self.canonicalize_tags(next_tags);
+
+            let tag_matches = self
+                .manager
+                .get_files_by_tags(&next_tags)
+                .map_err(|_| libc::EIO)?;
+
+            if !tag_matches.is_empty() {
+                let virtual_ino = self.get_or_create_tag_virtual_dir(&next_tags);
+                return Ok(Some((virtual_ino, self.tag_dir_attr(virtual_ino))));
+            }
+
+            if let Some(existing) = self.existing_tag_virtual_dir(&next_tags) {
+                return Ok(Some((existing, self.tag_dir_attr(existing))));
+            }
+
+            let current_matches = self
+                .manager
+                .get_files_by_tags(&current_tags)
+                .map_err(|_| libc::EIO)?;
+            for inode_id in current_matches {
+                if let Some(inode_name) = self.lookup_live_inode_name(inode_id)
+                    && inode_name == name
+                    && let Some(mut attr) = self.lookup_live_inode_attr(inode_id)
+                {
+                    let virtual_ino = self.get_or_create_tag_virtual_file(&current_tags, inode_id);
+                    attr.ino = virtual_ino;
+                    return Ok(Some((virtual_ino, attr)));
+                }
+            }
+
+            return Ok(None);
+        }
+
+        Ok(None)
+    }
+
+    fn handle_tagfs_control_write(&self, data: &[u8]) -> Result<(), i32> {
+        let command = String::from_utf8_lossy(data).trim().to_string();
+        if command.is_empty() {
+            return Err(EINVAL);
+        }
+
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err(EINVAL);
+        }
+
+        match parts[0] {
+            "set" => {
+                if parts.len() < 3 {
+                    return Err(EINVAL);
+                }
+                let path = parts[1];
+                let tags: Vec<String> = parts[2..].iter().map(|s| s.to_string()).collect();
+                self.manager
+                    .set_file_tags_by_path(path, tags)
+                    .map_err(|_| libc::EIO)?;
+                Ok(())
+            }
+            "del" => {
+                let path = parts[1];
+                let inode_id = self
+                    .manager
+                    .resolve_inode_by_path(path)
+                    .map_err(|_| libc::EIO)?
+                    .ok_or(ENOENT)?;
+                self.manager
+                    .delete_file_tags(inode_id)
+                    .map_err(|_| libc::EIO)?;
+                Ok(())
+            }
+            _ => Err(EINVAL),
+        }
+    }
 }
 
 impl Filesystem for BetterFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_str().unwrap();
+
+        if parent == FUSE_ROOT_ID && name_str == ".tagfs_ctl" {
+            return reply.entry(&TTL, &tagfs_control_attr(), 0);
+        }
+
+        match self.resolve_tag_lookup(parent, name_str) {
+            Ok(Some((_ino, attr))) => {
+                return reply.entry(&TTL, &attr, 0);
+            }
+            Ok(None) => {}
+            Err(code) => {
+                return reply.error(code);
+            }
+        }
 
         if parent == FUSE_ROOT_ID && name_str == ".snapshots" {
             return reply.entry(&TTL, &dir_attr(SNAPSHOT_DIR_ID), 0);
@@ -766,6 +1173,26 @@ impl Filesystem for BetterFS {
     }
 
     fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+        if ino == TAGFS_CONTROL_ID {
+            return reply.attr(&TTL, &tagfs_control_attr());
+        }
+
+        if ino == TAGS_DIR_ID {
+            return reply.attr(&TTL, &self.tag_dir_attr(TAGS_DIR_ID));
+        }
+
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.attr(&TTL, &self.tag_dir_attr(ino));
+        }
+
+        if self.is_tag_virtual_file_inode(ino)
+            && let Some(real_ino) = self.real_inode_for_virtual_file(ino)
+            && let Some(mut attr) = self.lookup_live_inode_attr(real_ino)
+        {
+            attr.ino = ino;
+            return reply.attr(&TTL, &attr);
+        }
+
         if ino == SNAPSHOT_DIR_ID {
             return reply.attr(&TTL, &dir_attr(SNAPSHOT_DIR_ID));
         }
@@ -802,6 +1229,85 @@ impl Filesystem for BetterFS {
         offset: i64,
         mut reply: ReplyDirectory
     ) {
+        if ino == TAGS_DIR_ID {
+            if offset == 0 {
+                let _ = reply.add(TAGS_DIR_ID, 0, FileType::Directory, ".");
+                let _ = reply.add(FUSE_ROOT_ID, 1, FileType::Directory, "..");
+
+                let mut top_tags: HashSet<String> = self
+                    .manager
+                    .get_next_level_tags(&[])
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+
+                for ctx in self.tag_virtual_dirs.read().unwrap().values() {
+                    if ctx.tags.len() == 1 {
+                        top_tags.insert(ctx.tags[0].clone());
+                    }
+                }
+
+                let mut top_tags_vec: Vec<String> = top_tags.into_iter().collect();
+                top_tags_vec.sort();
+                for (i, tag) in top_tags_vec.iter().enumerate() {
+                    let virtual_ino = self.get_or_create_tag_virtual_dir(std::slice::from_ref(tag));
+                    let _ = reply.add(virtual_ino, (i + 2) as i64, FileType::Directory, tag);
+                }
+            }
+            reply.ok();
+            return;
+        }
+
+        if let Some(current_tags) = self.get_virtual_dir_tags(ino) {
+            if offset == 0 {
+                let _ = reply.add(ino, 0, FileType::Directory, ".");
+                let _ = reply.add(TAGS_DIR_ID, 1, FileType::Directory, "..");
+
+                let mut next_offset = 2i64;
+                let mut next_tags: HashSet<String> = self
+                    .manager
+                    .get_next_level_tags(&current_tags)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+
+                let current_set: HashSet<String> = current_tags.iter().cloned().collect();
+                for ctx in self.tag_virtual_dirs.read().unwrap().values() {
+                    if ctx.tags.len() == current_tags.len() + 1 {
+                        let ctx_set: HashSet<String> = ctx.tags.iter().cloned().collect();
+                        if current_set.is_subset(&ctx_set) {
+                            for tag in &ctx.tags {
+                                if !current_set.contains(tag) {
+                                    next_tags.insert(tag.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let mut next_tags_vec: Vec<String> = next_tags.into_iter().collect();
+                next_tags_vec.sort();
+                for tag in next_tags_vec {
+                    let mut extended = current_tags.clone();
+                    extended.push(tag.clone());
+                    let virtual_ino = self.get_or_create_tag_virtual_dir(&extended);
+                    let _ = reply.add(virtual_ino, next_offset, FileType::Directory, tag);
+                    next_offset += 1;
+                }
+
+                let matching_inodes = self.manager.get_files_by_tags(&current_tags).unwrap_or_default();
+                for inode_id in matching_inodes {
+                    if let Some(name) = self.lookup_live_inode_name(inode_id) {
+                        let virtual_ino = self.get_or_create_tag_virtual_file(&current_tags, inode_id);
+                        let _ = reply.add(virtual_ino, next_offset, FileType::RegularFile, name);
+                        next_offset += 1;
+                    }
+                }
+            }
+            reply.ok();
+            return;
+        }
+
         if ino == SNAPSHOT_DIR_ID {
             if offset == 0 {
                 let _ = reply.add(SNAPSHOT_DIR_ID, 0, FileType::Directory, ".");
@@ -868,9 +1374,19 @@ impl Filesystem for BetterFS {
                 let _ = reply.add(ino, 0, FileType::Directory, ".");
                 let _ = reply.add(ino, 1, FileType::Directory, "..");
 
+                let mut next_offset = 2i64;
+                if ino == FUSE_ROOT_ID {
+                    let _ = reply.add(SNAPSHOT_DIR_ID, next_offset, FileType::Directory, ".snapshots");
+                    next_offset += 1;
+                    let _ = reply.add(TAGS_DIR_ID, next_offset, FileType::Directory, "@tags");
+                    next_offset += 1;
+                    let _ = reply.add(TAGFS_CONTROL_ID, next_offset, FileType::RegularFile, ".tagfs_ctl");
+                    next_offset += 1;
+                }
+
                 for (i, (name, child_arc)) in guard.children.iter().enumerate() {
                     let child = child_arc.read().unwrap();
-                    let _ = reply.add(child.id, (i + 2) as i64, child.attr.kind, name);
+                    let _ = reply.add(child.id, next_offset + i as i64, child.attr.kind, name);
                 }
             }
             reply.ok();
@@ -890,6 +1406,16 @@ impl Filesystem for BetterFS {
         _lock_owner: Option<u64>,
         reply: ReplyData
     ) {
+        if ino == TAGFS_CONTROL_ID {
+            return reply.data(&[]);
+        }
+
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.error(EISDIR);
+        }
+
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+
         if ino == SNAPSHOT_CREATE_ID {
             return reply.data(&[]);
         }
@@ -899,15 +1425,15 @@ impl Filesystem for BetterFS {
 
         // Try Live Registry first
         let registry = self.inode_registry.read().unwrap();
-        if registry.contains_key(&ino) {
+        if registry.contains_key(&target_ino) {
             // Fetch data directly by Inode ID from the manager
-            target_recipe = Some(self.manager.read_file_by_id(ino));
+            target_recipe = Some(self.manager.read_file_by_id(target_ino));
         } else {
             // Fallback: Check Snapshots (Chronos)
             let snaps = self.snapshots.read().unwrap();
             for (_name, snapshot) in snaps.iter() {
-                if self.find_in_snapshot_tree(&snapshot.root, ino).is_some() {
-                    target_recipe = Some(self.manager.read_file_by_id(ino));
+                if self.find_in_snapshot_tree(&snapshot.root, target_ino).is_some() {
+                    target_recipe = Some(self.manager.read_file_by_id(target_ino));
                     break;
                 }
             }
@@ -917,7 +1443,7 @@ impl Filesystem for BetterFS {
         // 2. Handle the Data Retrieval
         match target_recipe {
             Some(Ok(_)) => {
-                let data = self.read_cached_or_load(ino).unwrap_or_default();
+                let data = self.read_cached_or_load(target_ino).unwrap_or_default();
                 let start = offset as usize;
                 if start < data.len() {
                     let end = std::cmp::min(start + (size as usize), data.len());
@@ -950,6 +1476,23 @@ impl Filesystem for BetterFS {
         _lock_owner: Option<u64>,
         reply: ReplyWrite,
     ) {
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+
+        if ino == TAGFS_CONTROL_ID {
+            if offset != 0 {
+                return reply.error(EINVAL);
+            }
+
+            return match self.handle_tagfs_control_write(data) {
+                Ok(_) => reply.written(data.len() as u32),
+                Err(code) => reply.error(code),
+            };
+        }
+
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.error(EROFS);
+        }
+
         if ino == SNAPSHOT_CREATE_ID {
             if offset != 0 {
                 return reply.error(EINVAL);
@@ -967,12 +1510,12 @@ impl Filesystem for BetterFS {
             };
         }
 
-        if self.inode_in_snapshot(ino) {
+        if self.inode_in_snapshot(target_ino) {
             return reply.error(EROFS);
         }
 
         // 1. Read existing data via page cache (or load from backend)
-        let mut file_data = self.read_cached_or_load(ino).unwrap_or_default();
+        let mut file_data = self.read_cached_or_load(target_ino).unwrap_or_default();
 
         // 2. Overlay new data
         let end = (offset as usize) + data.len();
@@ -982,15 +1525,44 @@ impl Filesystem for BetterFS {
         file_data[offset as usize..end].copy_from_slice(data);
 
         // 3. Write-back cache: mark dirty and return success
-        if self.write_to_cache(ino, file_data.clone(), true).is_err() {
+        if self.write_to_cache(target_ino, file_data.clone(), true).is_err() {
             return reply.error(libc::EIO);
         }
 
-        if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino) {
+        if let Some(node_arc) = self.inode_registry.read().unwrap().get(&target_ino) {
             let mut node = node_arc.write().unwrap();
             node.attr.size = file_data.len() as u64;
             node.attr.blocks = node.attr.size.div_ceil(512);
             node.attr.mtime = SystemTime::now();
+        }
+
+        if self.manager.get_file_tags(target_ino).unwrap_or_default().is_empty() {
+            let filename = self
+                .lookup_live_inode_name(target_ino)
+                .or_else(|| {
+                    self.manager
+                        .load_inode(target_ino)
+                        .ok()
+                        .flatten()
+                        .map(|meta| meta.name)
+                })
+                .unwrap_or_default();
+
+            let parent_ino = self
+                .lookup_live_inode_parent(target_ino)
+                .or_else(|| {
+                    self.manager
+                        .load_inode(target_ino)
+                        .ok()
+                        .flatten()
+                        .map(|meta| meta.parent_id)
+                })
+                .unwrap_or(FUSE_ROOT_ID);
+
+            let auto_tags = self.derive_tags_from_parent_ancestry(parent_ino);
+            if !auto_tags.is_empty() && !filename.is_empty() {
+                let _ = self.manager.set_file_tags(target_ino, &filename, auto_tags);
+            }
         }
 
         reply.written(data.len() as u32);
@@ -1011,44 +1583,41 @@ impl Filesystem for BetterFS {
         }
 
         let name_str = name.to_str().unwrap().to_string();
-        let new_id = self.generate_id();
-        
-        // 1. Create Inode in memory with its IDENTITY
-        let mut new_inode = Inode::new(new_id, FileType::RegularFile);
-        new_inode.name = name_str.clone();   // Store the name
-        new_inode.parent_id = parent;        // Store the backlink
 
-        // 2. Persist the FULL Inode Metadata to DB
-        // This includes name, parent_id, and attributes
-        if let Err(_e) = self.manager.save_inode(&new_inode) {
-            return reply.error(libc::EIO);
+        let mut real_parent = parent;
+        let mut virtual_tags: Option<Vec<String>> = None;
+
+        if parent == TAGS_DIR_ID {
+            return reply.error(EINVAL);
         }
 
-        if self.manager.save_dirent(parent, &name_str, new_id).is_err() {
-            return reply.error(libc::EIO);
+        if self.is_tag_virtual_dir_inode(parent)
+            && let Some(tags) = self.get_virtual_dir_tags(parent)
+        {
+            match self.ensure_real_path_for_tags(&tags) {
+                Ok(parent_ino) => {
+                    real_parent = parent_ino;
+                    virtual_tags = Some(tags);
+                }
+                Err(code) => return reply.error(code),
+            }
         }
 
-        // 3. Initialize an empty Recipe in the DB
-        // This ensures the file is valid even before the first write
-        let recipe = FileRecipe {
-            file_size: 0,
-            chunks: vec![],
-            kind: FileKind::File,
+        let new_id = match self.create_live_file_under_parent(real_parent, &name_str) {
+            Ok(id) => id,
+            Err(code) => return reply.error(code),
         };
-        let _ = self.manager.save_recipe(new_id, &recipe);
 
-        // 4. Update memory structures
-        let new_arc = Arc::new(RwLock::new(new_inode));
-        
-        // Update Parent's child map
-        if let Some(parent_node) = self.inode_registry.read().unwrap().get(&parent) {
-            parent_node.write().unwrap().children.insert(name_str, new_arc.clone());
+        let mut attr = match self.lookup_live_inode_attr(new_id) {
+            Some(a) => a,
+            None => return reply.error(libc::EIO),
+        };
+
+        if let Some(tags) = virtual_tags {
+            let virtual_ino = self.get_or_create_tag_virtual_file(&tags, new_id);
+            attr.ino = virtual_ino;
         }
-        
-        // Update Global Registry
-        self.inode_registry.write().unwrap().insert(new_id, new_arc.clone());
-        
-        let attr = new_arc.read().unwrap().attr;
+
         reply.created(&TTL, &attr, 0, 0, 0);
     }
 
@@ -1062,6 +1631,27 @@ impl Filesystem for BetterFS {
         reply: ReplyEntry
     ) {
         let name_str = name.to_str().unwrap();
+
+        if parent == TAGS_DIR_ID {
+            let tags = vec![name_str.to_string()];
+            let virtual_ino = self.get_or_create_tag_virtual_dir(&tags);
+            if let Err(code) = self.ensure_real_path_for_tags(&tags) {
+                return reply.error(code);
+            }
+            return reply.entry(&TTL, &self.tag_dir_attr(virtual_ino), 0);
+        }
+
+        if self.is_tag_virtual_dir_inode(parent)
+            && let Some(mut tags) = self.get_virtual_dir_tags(parent)
+        {
+            tags.push(name_str.to_string());
+            let canonical = self.canonicalize_tags(tags);
+            let virtual_ino = self.get_or_create_tag_virtual_dir(&canonical);
+            if let Err(code) = self.ensure_real_path_for_tags(&canonical) {
+                return reply.error(code);
+            }
+            return reply.entry(&TTL, &self.tag_dir_attr(virtual_ino), 0);
+        }
 
         if parent == SNAPSHOT_DIR_ID && name_str != ".create" {
             return reply.error(EROFS);
@@ -1182,19 +1772,25 @@ impl Filesystem for BetterFS {
         _flags: Option<u32>,
         reply: ReplyAttr
     ) {
-        if self.inode_in_snapshot(ino) {
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.error(EROFS);
+        }
+
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+
+        if self.inode_in_snapshot(target_ino) {
             return reply.error(EROFS);
         }
 
         if let Some(new_size) = size {
-            let mut file_data = self.read_cached_or_load(ino).unwrap_or_default();
+            let mut file_data = self.read_cached_or_load(target_ino).unwrap_or_default();
             file_data.resize(new_size as usize, 0);
 
-            if self.write_to_cache(ino, file_data, true).is_err() {
+            if self.write_to_cache(target_ino, file_data, true).is_err() {
                 return reply.error(libc::EIO);
             }
 
-            if let Some(node_arc) = self.inode_registry.read().unwrap().get(&ino) {
+            if let Some(node_arc) = self.inode_registry.read().unwrap().get(&target_ino) {
                 let mut node = node_arc.write().unwrap();
                 node.attr.size = new_size;
                 node.attr.blocks = new_size.div_ceil(512);
@@ -1207,6 +1803,14 @@ impl Filesystem for BetterFS {
     }
 
     fn open(&mut self, _req: &Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
+        if self.is_tag_virtual_dir_inode(_ino) {
+            return reply.error(EISDIR);
+        }
+
+        if _ino == TAGFS_CONTROL_ID {
+            return reply.opened(0, 0);
+        }
+
         reply.opened(0, 0);
     }
 
@@ -1218,7 +1822,12 @@ impl Filesystem for BetterFS {
         _datasync: bool,
         reply: ReplyEmpty,
     ) {
-        if self.flush_inode_cache(ino).is_ok() {
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.error(EROFS);
+        }
+
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+        if self.flush_inode_cache(target_ino).is_ok() {
             reply.ok();
         } else {
             reply.error(libc::EIO);
@@ -1235,7 +1844,12 @@ impl Filesystem for BetterFS {
         _flush: bool,
         reply: ReplyEmpty
     ) {
-        if self.flush_inode_cache(ino).is_ok() {
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.error(EROFS);
+        }
+
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+        if self.flush_inode_cache(target_ino).is_ok() {
             reply.ok();
         } else {
             reply.error(libc::EIO);
@@ -1248,6 +1862,38 @@ impl Filesystem for BetterFS {
         }
 
         let name_str = name.to_str().unwrap();
+
+        if self.is_tag_virtual_dir_inode(parent) {
+            let real_ino = match self.resolve_real_file_in_tag_dir(parent, name_str) {
+                Ok(ino) => ino,
+                Err(code) => return reply.error(code),
+            };
+
+            let (real_parent, real_name) = {
+                let registry = self.inode_registry.read().unwrap();
+                let Some(node_arc) = registry.get(&real_ino) else {
+                    return reply.error(ENOENT);
+                };
+                let node = node_arc.read().unwrap();
+                (node.parent_id, node.name.clone())
+            };
+
+            let registry = self.inode_registry.read().unwrap();
+            let parent_node = match registry.get(&real_parent) {
+                Some(node) => node.clone(),
+                None => return reply.error(ENOENT),
+            };
+            drop(registry);
+
+            let mut parent_guard = parent_node.write().unwrap();
+            if parent_guard.children.remove(&real_name).is_some() {
+                let _ = self.manager.delete_dirent(real_parent, &real_name);
+                let _ = self.manager.delete_file_tags(real_ino);
+                self.evict_inode_cache(real_ino);
+                return reply.ok();
+            }
+            return reply.error(ENOENT);
+        }
 
         let registry = self.inode_registry.read().unwrap();
         let parent_node = match registry.get(&parent) {
@@ -1263,6 +1909,7 @@ impl Filesystem for BetterFS {
         if let Some(removed_node) = parent_guard.children.remove(name_str) {
             let removed_ino = removed_node.read().unwrap().id;
             let _ = self.manager.delete_dirent(parent, name_str);
+            let _ = self.manager.delete_file_tags(removed_ino);
             self.evict_inode_cache(removed_ino);
             reply.ok();
         } else {
@@ -1272,6 +1919,10 @@ impl Filesystem for BetterFS {
 
     fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         let name_str = name.to_str().unwrap();
+
+        if parent == TAGS_DIR_ID || self.is_tag_virtual_dir_inode(parent) {
+            return reply.error(EINVAL);
+        }
 
         // Special case: Deleting snapshots
         if parent == SNAPSHOT_DIR_ID {

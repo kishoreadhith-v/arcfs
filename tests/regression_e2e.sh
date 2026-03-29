@@ -191,12 +191,21 @@ main() {
     must "create nested file" "echo 'report-v1' > '${MOUNT_DIR}/docs/sub/report.txt'"
     assert_file_content "read nested file" "${MOUNT_DIR}/docs/sub/report.txt" "report-v1"
 
+    must "@tags virtual root is visible" "ls -la '${MOUNT_DIR}/@tags'"
+    assert_file_content "tag path resolves file" "${MOUNT_DIR}/@tags/docs/sub/report.txt" "report-v1"
+    assert_file_content "tag permutation resolves file" "${MOUNT_DIR}/@tags/sub/docs/report.txt" "report-v1"
+    must "write through tag path" "echo 'report-v1-tagwrite' > '${MOUNT_DIR}/@tags/docs/sub/report.txt'"
+    assert_file_content "live file reflects tag write" "${MOUNT_DIR}/docs/sub/report.txt" "report-v1-tagwrite"
+    must "create file through tag path" "echo 'new-via-tag' > '${MOUNT_DIR}/@tags/sub/docs/new_via_tag.txt'"
+    assert_file_content "created tag file visible in live tree" "${MOUNT_DIR}/docs/sub/new_via_tag.txt" "new-via-tag"
+
     must "snapshot create via .create" "echo 'snap1' > '${MOUNT_DIR}/.snapshots/.create'"
     must "snapshot listed after .create" "ls -1 '${MOUNT_DIR}/.snapshots' | grep -x 'snap1'"
 
     must "modify live file after snapshot" "echo 'report-v2' > '${MOUNT_DIR}/docs/sub/report.txt'"
     assert_file_content "live file moved forward" "${MOUNT_DIR}/docs/sub/report.txt" "report-v2"
-    assert_file_content "snapshot file preserved" "${MOUNT_DIR}/.snapshots/snap1/docs/sub/report.txt" "report-v1"
+    assert_file_content "tag path reflects live updates" "${MOUNT_DIR}/@tags/docs/sub/report.txt" "report-v2"
+    assert_file_content "snapshot file preserved" "${MOUNT_DIR}/.snapshots/snap1/docs/sub/report.txt" "report-v1-tagwrite"
 
     assert_snapshot_readonly "snapshot path is read-only" "${MOUNT_DIR}/.snapshots/snap1/docs/sub/report.txt"
 
@@ -208,7 +217,7 @@ main() {
 
     must "restore workflow trigger" "mkdir '${MOUNT_DIR}/.restore_snap1'"
     sleep 2
-    assert_file_content "restore brings live file back to snapshot state" "${MOUNT_DIR}/docs/sub/report.txt" "report-v1"
+    assert_file_content "restore brings live file back to snapshot state" "${MOUNT_DIR}/docs/sub/report.txt" "report-v1-tagwrite"
     must "auto-backup snapshot created on restore" "ls -1 '${MOUNT_DIR}/.snapshots' | grep '^before_restore_'"
 
     info "Testing persistence across remount"
@@ -218,9 +227,9 @@ main() {
         exit 1
     fi
 
-    assert_file_content "live file persisted after remount" "${MOUNT_DIR}/docs/sub/report.txt" "report-v1"
+    assert_file_content "live file persisted after remount" "${MOUNT_DIR}/docs/sub/report.txt" "report-v1-tagwrite"
     must "snapshot persisted after remount" "ls -1 '${MOUNT_DIR}/.snapshots' | grep -x 'snap1'"
-    assert_file_content "snapshot content persisted after remount" "${MOUNT_DIR}/.snapshots/snap1/docs/sub/report.txt" "report-v1"
+    assert_file_content "snapshot content persisted after remount" "${MOUNT_DIR}/.snapshots/snap1/docs/sub/report.txt" "report-v1-tagwrite"
 
     info "Running metadata/maintenance checks"
     stop_fs

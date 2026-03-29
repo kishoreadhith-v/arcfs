@@ -46,6 +46,13 @@ pub struct SnapshotMetadata {
     pub root_id: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileTagSet {
+    pub file_id: u64,
+    pub filename: String,
+    pub tags: Vec<String>,
+}
+
 pub struct FileManager {
     storage: Storage,
     db: sled::Db,
@@ -75,6 +82,67 @@ impl FileManager {
         format!("dirent:{}:", parent_id)
     }
 
+    fn ino_tags_key(inode_id: u64) -> String {
+        format!("ino_tags:{}", inode_id)
+    }
+
+    fn tag_index_key(tag: &str) -> String {
+        format!("tag_index:{}", tag)
+    }
+
+    fn normalize_tags(tags: Vec<String>) -> Vec<String> {
+        let mut dedup = HashSet::new();
+        for tag in tags {
+            let normalized = tag.trim().to_lowercase();
+            if !normalized.is_empty() {
+                dedup.insert(normalized);
+            }
+        }
+
+        let mut out: Vec<String> = dedup.into_iter().collect();
+        out.sort();
+        out
+    }
+
+    fn load_tag_index_set(&self, tag: &str) -> Result<HashSet<u64>, String> {
+        let key = Self::tag_index_key(tag);
+        let value = self
+            .db
+            .get(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        match value {
+            Some(bytes) => {
+                let ids = bincode::deserialize::<Vec<u64>>(&bytes)
+                    .map_err(|e| format!("Tag index deserialization error: {}", e))?;
+                Ok(ids.into_iter().collect())
+            }
+            None => Ok(HashSet::new()),
+        }
+    }
+
+    fn save_tag_index_set(&self, tag: &str, ids: &HashSet<u64>) -> Result<(), String> {
+        let key = Self::tag_index_key(tag);
+
+        if ids.is_empty() {
+            self.db
+                .remove(key.as_bytes())
+                .map_err(|e| format!("Database error: {}", e))?;
+            return Ok(());
+        }
+
+        let mut vec_ids: Vec<u64> = ids.iter().copied().collect();
+        vec_ids.sort_unstable();
+        let encoded = bincode::serialize(&vec_ids)
+            .map_err(|e| format!("Tag index serialization error: {}", e))?;
+
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        Ok(())
+    }
+
     fn map_inode(inode: &crate::fuse_handler::Inode) -> InodeMetadata {
         InodeMetadata {
             id: inode.id,
@@ -83,6 +151,223 @@ impl FileManager {
             is_dir: inode.attr.kind == FileType::Directory,
             attr: InodeAttr { size: inode.attr.size },
         }
+    }
+
+    pub fn set_file_tags(
+        &self,
+        inode_id: u64,
+        filename: &str,
+        tags: Vec<String>,
+    ) -> Result<(), String> {
+        let normalized = Self::normalize_tags(tags);
+        let previous = self.get_file_tags(inode_id)?;
+
+        if normalized.is_empty() {
+            self.delete_file_tags(inode_id)?;
+            return Ok(());
+        }
+
+        let tag_set = FileTagSet {
+            file_id: inode_id,
+            filename: filename.to_string(),
+            tags: normalized.clone(),
+        };
+
+        let key = Self::ino_tags_key(inode_id);
+        let encoded = bincode::serialize(&tag_set)
+            .map_err(|e| format!("Tag set serialization error: {}", e))?;
+
+        self.db
+            .insert(key.as_bytes(), encoded)
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        let previous_set: HashSet<String> = previous.into_iter().collect();
+        let current_set: HashSet<String> = normalized.into_iter().collect();
+
+        for removed_tag in previous_set.difference(&current_set) {
+            let mut ids = self.load_tag_index_set(removed_tag)?;
+            ids.remove(&inode_id);
+            self.save_tag_index_set(removed_tag, &ids)?;
+        }
+
+        for added_tag in current_set {
+            let mut ids = self.load_tag_index_set(&added_tag)?;
+            ids.insert(inode_id);
+            self.save_tag_index_set(&added_tag, &ids)?;
+        }
+
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn get_file_tags(&self, inode_id: u64) -> Result<Vec<String>, String> {
+        let key = Self::ino_tags_key(inode_id);
+        let value = self
+            .db
+            .get(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        match value {
+            Some(bytes) => {
+                let tag_set = bincode::deserialize::<FileTagSet>(&bytes)
+                    .map_err(|e| format!("Tag set deserialization error: {}", e))?;
+                Ok(tag_set.tags)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
+    pub fn get_files_with_tag(&self, tag: &str) -> Result<Vec<u64>, String> {
+        let normalized = tag.trim().to_lowercase();
+        if normalized.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut ids: Vec<u64> = self.load_tag_index_set(&normalized)?.into_iter().collect();
+        ids.sort_unstable();
+        Ok(ids)
+    }
+
+    pub fn get_files_by_tags(&self, tags: &[String]) -> Result<Vec<u64>, String> {
+        let normalized = Self::normalize_tags(tags.to_vec());
+        if normalized.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut iter = normalized.iter();
+        let first = iter
+            .next()
+            .ok_or_else(|| "Missing first tag in query".to_string())?;
+
+        let mut candidates = self.load_tag_index_set(first)?;
+        for tag in iter {
+            let ids = self.load_tag_index_set(tag)?;
+            candidates.retain(|inode_id| ids.contains(inode_id));
+            if candidates.is_empty() {
+                return Ok(Vec::new());
+            }
+        }
+
+        let mut out: Vec<u64> = candidates.into_iter().collect();
+        out.sort_unstable();
+        Ok(out)
+    }
+
+    pub fn get_next_level_tags(&self, current_tags: &[String]) -> Result<Vec<String>, String> {
+        let normalized = Self::normalize_tags(current_tags.to_vec());
+        if normalized.is_empty() {
+            let mut all_tags = Vec::new();
+            for item in self.db.scan_prefix(b"tag_index:") {
+                let (key, _value) = item.map_err(|e| format!("Database error: {}", e))?;
+                let key_str = String::from_utf8(key.to_vec())
+                    .map_err(|e| format!("Invalid UTF-8 tag index key: {}", e))?;
+                if let Some(tag) = key_str.strip_prefix("tag_index:") {
+                    all_tags.push(tag.to_string());
+                }
+            }
+            all_tags.sort();
+            all_tags.dedup();
+            return Ok(all_tags);
+        }
+
+        let matching_inodes = self.get_files_by_tags(&normalized)?;
+        let current_set: HashSet<String> = normalized.into_iter().collect();
+        let mut next = HashSet::new();
+
+        for inode_id in matching_inodes {
+            for tag in self.get_file_tags(inode_id)? {
+                if !current_set.contains(&tag) {
+                    next.insert(tag);
+                }
+            }
+        }
+
+        let mut out: Vec<String> = next.into_iter().collect();
+        out.sort();
+        Ok(out)
+    }
+
+    pub fn delete_file_tags(&self, inode_id: u64) -> Result<(), String> {
+        let existing_tags = self.get_file_tags(inode_id)?;
+        for tag in existing_tags {
+            let mut ids = self.load_tag_index_set(&tag)?;
+            ids.remove(&inode_id);
+            self.save_tag_index_set(&tag, &ids)?;
+        }
+
+        let key = Self::ino_tags_key(inode_id);
+        self.db
+            .remove(key.as_bytes())
+            .map_err(|e| format!("Database error: {}", e))?;
+
+        self.db.flush().map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
+    }
+
+    pub fn add_tag_to_file(&self, inode_id: u64, filename: &str, tag: &str) -> Result<(), String> {
+        let normalized_tag = tag.trim().to_lowercase();
+        if normalized_tag.is_empty() {
+            return Ok(());
+        }
+
+        let mut tags = self.get_file_tags(inode_id)?;
+        tags.push(normalized_tag);
+        self.set_file_tags(inode_id, filename, tags)
+    }
+
+    pub fn remove_tag_from_file(&self, inode_id: u64, filename: &str, tag: &str) -> Result<(), String> {
+        let normalized_tag = tag.trim().to_lowercase();
+        if normalized_tag.is_empty() {
+            return Ok(());
+        }
+
+        let mut tags = self.get_file_tags(inode_id)?;
+        tags.retain(|t| t != &normalized_tag);
+        self.set_file_tags(inode_id, filename, tags)
+    }
+
+    pub fn resolve_inode_by_path(&self, path: &str) -> Result<Option<u64>, String> {
+        let parts: Vec<&str> = path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect();
+
+        if parts.is_empty() {
+            return Ok(Some(1));
+        }
+
+        let mut current_inode = 1u64;
+        for part in parts {
+            let key = Self::dirent_key(current_inode, part);
+            let value = self
+                .db
+                .get(key.as_bytes())
+                .map_err(|e| format!("Database error: {}", e))?;
+
+            let Some(bytes) = value else {
+                return Ok(None);
+            };
+
+            current_inode = bincode::deserialize::<u64>(&bytes)
+                .map_err(|e| format!("Dirent deserialization error: {}", e))?;
+        }
+
+        Ok(Some(current_inode))
+    }
+
+    pub fn set_file_tags_by_path(&self, path: &str, tags: Vec<String>) -> Result<u64, String> {
+        let inode_id = self
+            .resolve_inode_by_path(path)?
+            .ok_or_else(|| format!("Path not found: {}", path))?;
+
+        let filename = path
+            .rsplit('/')
+            .find(|part| !part.is_empty())
+            .unwrap_or(path)
+            .to_string();
+
+        self.set_file_tags(inode_id, &filename, tags)?;
+        Ok(inode_id)
     }
 
     fn create_recipe_from_data(&self, data: &[u8]) -> Result<FileRecipe, String> {

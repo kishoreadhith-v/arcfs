@@ -44,6 +44,42 @@ enum Commands {
         /// File path to analyze
         file_path: PathBuf,
     },
+    /// Set/replace tags for an inode
+    TagSet {
+        /// Target inode id
+        inode_id: u64,
+        /// Human label used in metadata
+        filename: String,
+        /// Tags to set (space-separated)
+        tags: Vec<String>,
+    },
+    /// Set/replace tags for a file using a live path like docs/sub/report.txt
+    TagSetPath {
+        /// Path relative to BetterFS root (without mount prefix)
+        path: String,
+        /// Tags to set (space-separated)
+        tags: Vec<String>,
+    },
+    /// Get tags for an inode
+    TagGet {
+        /// Target inode id
+        inode_id: u64,
+    },
+    /// Query inodes by tag intersection
+    TagQuery {
+        /// Tags to query with AND semantics
+        tags: Vec<String>,
+    },
+    /// List possible next tags from a partial query
+    TagNext {
+        /// Current query tag path
+        tags: Vec<String>,
+    },
+    /// Delete all tags for an inode
+    TagDelete {
+        /// Target inode id
+        inode_id: u64,
+    },
 }
 
 fn percentile(sorted: &[usize], p: f64) -> usize {
@@ -186,5 +222,72 @@ fn main() {
             println!("- p99: {}", percentile(&sorted, 0.99));
             println!("- max: {}", max);
         }
+        Commands::TagSet {
+            inode_id,
+            filename,
+            tags,
+        } => {
+            if tags.is_empty() {
+                eprintln!("Error: provide at least one tag");
+                return;
+            }
+
+            match manager.set_file_tags(inode_id, &filename, tags) {
+                Ok(_) => println!("Tags updated for inode {}", inode_id),
+                Err(e) => eprintln!("Error: {}", e),
+            }
+        }
+        Commands::TagSetPath { path, tags } => {
+            if tags.is_empty() {
+                eprintln!("Error: provide at least one tag");
+                return;
+            }
+
+            match manager.set_file_tags_by_path(&path, tags) {
+                Ok(inode_id) => println!("Tags updated for path '{}' (inode {})", path, inode_id),
+                Err(e) => eprintln!("Error: {}", e),
+            }
+        }
+        Commands::TagGet { inode_id } => match manager.get_file_tags(inode_id) {
+            Ok(tags) => {
+                if tags.is_empty() {
+                    println!("No tags for inode {}", inode_id);
+                } else {
+                    println!("inode {} tags: {}", inode_id, tags.join(", "));
+                }
+            }
+            Err(e) => eprintln!("Error: {}", e),
+        },
+        Commands::TagQuery { tags } => {
+            if tags.is_empty() {
+                eprintln!("Error: provide at least one tag");
+                return;
+            }
+
+            match manager.get_files_by_tags(&tags) {
+                Ok(inodes) => {
+                    if inodes.is_empty() {
+                        println!("No inodes matched");
+                    } else {
+                        println!("Matched inodes: {:?}", inodes);
+                    }
+                }
+                Err(e) => eprintln!("Error: {}", e),
+            }
+        }
+        Commands::TagNext { tags } => match manager.get_next_level_tags(&tags) {
+            Ok(next) => {
+                if next.is_empty() {
+                    println!("No next-level tags");
+                } else {
+                    println!("Next tags: {}", next.join(", "));
+                }
+            }
+            Err(e) => eprintln!("Error: {}", e),
+        },
+        Commands::TagDelete { inode_id } => match manager.delete_file_tags(inode_id) {
+            Ok(_) => println!("Deleted tags for inode {}", inode_id),
+            Err(e) => eprintln!("Error: {}", e),
+        },
     }
 }
