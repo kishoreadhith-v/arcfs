@@ -14,8 +14,8 @@ use fuser::{
     ReplyWrite,
     Request,
 };
-use libc::{EEXIST, EINVAL, EISDIR, ENOENT, EROFS};
-use std::collections::{HashMap, HashSet, VecDeque};
+use libc::{ EEXIST, EINVAL, EISDIR, ENOENT, EROFS };
+use std::collections::{ HashMap, HashSet, VecDeque };
 use std::ffi::OsStr;
 use std::sync::atomic::{ AtomicU64, Ordering };
 use std::sync::{ Arc, RwLock };
@@ -117,7 +117,7 @@ fn tagfs_control_attr() -> FileAttr {
     attr
 }
 
-pub struct BetterFS {
+pub struct ArcFS {
     pub manager: FileManager,
     pub inode_registry: Arc<RwLock<HashMap<u64, Arc<RwLock<Inode>>>>>,
     pub root: Arc<RwLock<Inode>>,
@@ -133,13 +133,13 @@ pub struct BetterFS {
     next_inode: AtomicU64,
 }
 
-impl BetterFS {
+impl ArcFS {
     pub fn new(manager: FileManager) -> Self {
         let registry = Arc::new(RwLock::new(HashMap::new()));
         let root = Arc::new(RwLock::new(Inode::new(FUSE_ROOT_ID, FileType::Directory)));
         registry.write().unwrap().insert(FUSE_ROOT_ID, root.clone());
 
-        let mut fs = BetterFS {
+        let mut fs = ArcFS {
             manager,
             inode_registry: registry,
             root,
@@ -187,10 +187,7 @@ impl BetterFS {
                             delete_err
                         );
                     } else {
-                        eprintln!(
-                            "[CHRONOS] Pruned stale snapshot metadata '{}'",
-                            meta.name
-                        );
+                        eprintln!("[CHRONOS] Pruned stale snapshot metadata '{}'", meta.name);
                     }
                     continue;
                 }
@@ -211,7 +208,7 @@ impl BetterFS {
     }
 
     fn hydrate_tree(&mut self) {
-        println!("[BOOT] Reconstructing BetterFS Inode Tree...");
+        println!("[BOOT] Reconstructing ArcFS Inode Tree...");
         self.hydrate_live_children(self.root.clone(), FUSE_ROOT_ID);
     }
 
@@ -227,18 +224,16 @@ impl BetterFS {
         for dirent in dirents {
             let inode_meta = match self.manager.load_inode(dirent.child_inode_id) {
                 Ok(Some(meta)) => meta,
-                Ok(None) => continue,
+                Ok(None) => {
+                    continue;
+                }
                 Err(e) => {
                     eprintln!("[BOOT] Failed loading inode {}: {}", dirent.child_inode_id, e);
                     continue;
                 }
             };
 
-            let kind = if inode_meta.is_dir {
-                FileType::Directory
-            } else {
-                FileType::RegularFile
-            };
+            let kind = if inode_meta.is_dir { FileType::Directory } else { FileType::RegularFile };
 
             let mut child_inode = Inode::new(inode_meta.id, kind);
             child_inode.parent_id = inode_meta.parent_id;
@@ -247,16 +242,9 @@ impl BetterFS {
             child_inode.attr.blocks = inode_meta.attr.size.div_ceil(512);
 
             let child_arc = Arc::new(RwLock::new(child_inode));
-            self.inode_registry
-                .write()
-                .unwrap()
-                .insert(inode_meta.id, child_arc.clone());
+            self.inode_registry.write().unwrap().insert(inode_meta.id, child_arc.clone());
 
-            parent_arc
-                .write()
-                .unwrap()
-                .children
-                .insert(dirent.name, child_arc.clone());
+            parent_arc.write().unwrap().children.insert(dirent.name, child_arc.clone());
 
             let current_max = self.next_inode.load(Ordering::SeqCst);
             if inode_meta.id >= current_max {
@@ -272,22 +260,17 @@ impl BetterFS {
     fn restore_snapshot_subtree(
         &self,
         inode_id: u64,
-        visited: &mut HashSet<u64>,
+        visited: &mut HashSet<u64>
     ) -> Result<Arc<RwLock<Inode>>, String> {
         if !visited.insert(inode_id) {
             return Err(format!("Cycle detected while restoring inode {}", inode_id));
         }
 
-        let inode_meta = self
-            .manager
+        let inode_meta = self.manager
             .load_inode(inode_id)?
             .ok_or_else(|| format!("Missing inode metadata for {}", inode_id))?;
 
-        let kind = if inode_meta.is_dir {
-            FileType::Directory
-        } else {
-            FileType::RegularFile
-        };
+        let kind = if inode_meta.is_dir { FileType::Directory } else { FileType::RegularFile };
 
         let mut inode = Inode::new(inode_meta.id, kind);
         inode.parent_id = inode_meta.parent_id;
@@ -300,11 +283,7 @@ impl BetterFS {
 
         for child in children {
             let child_arc = self.restore_snapshot_subtree(child.child_inode_id, visited)?;
-            node_arc
-                .write()
-                .unwrap()
-                .children
-                .insert(child.name, child_arc);
+            node_arc.write().unwrap().children.insert(child.name, child_arc);
         }
 
         Ok(node_arc)
@@ -315,10 +294,9 @@ impl BetterFS {
         source_inode_id: u64,
         parent_id: u64,
         node_name: &str,
-        register_live: bool,
+        register_live: bool
     ) -> Result<Arc<RwLock<Inode>>, String> {
-        let source_meta = self
-            .manager
+        let source_meta = self.manager
             .load_inode(source_inode_id)?
             .ok_or_else(|| format!("Missing source inode metadata {}", source_inode_id))?;
 
@@ -339,10 +317,7 @@ impl BetterFS {
         self.manager.save_dirent(parent_id, node_name, new_id)?;
 
         if source_kind == FileType::RegularFile {
-            let recipe = self
-                .manager
-                .load_recipe(source_inode_id)?
-                .unwrap_or(FileRecipe {
+            let recipe = self.manager.load_recipe(source_inode_id)?.unwrap_or(FileRecipe {
                 file_size: 0,
                 chunks: Vec::new(),
                 kind: FileKind::File,
@@ -353,10 +328,7 @@ impl BetterFS {
         let new_arc = Arc::new(RwLock::new(new_inode));
 
         if register_live {
-            self.inode_registry
-                .write()
-                .unwrap()
-                .insert(new_id, new_arc.clone());
+            self.inode_registry.write().unwrap().insert(new_id, new_arc.clone());
         }
 
         let children = self.manager.list_dirents(source_inode_id)?;
@@ -365,13 +337,9 @@ impl BetterFS {
                 child.child_inode_id,
                 new_id,
                 &child.name,
-                register_live,
+                register_live
             )?;
-            new_arc
-                .write()
-                .unwrap()
-                .children
-                .insert(child.name, cloned_child);
+            new_arc.write().unwrap().children.insert(child.name, cloned_child);
         }
 
         Ok(new_arc)
@@ -384,18 +352,20 @@ impl BetterFS {
 
         self.flush_all_dirty_cache()?;
 
-        let frozen_root = self.clone_subtree_from_metadata(FUSE_ROOT_ID, SNAPSHOT_DIR_ID, snap_name, false)?;
+        let frozen_root = self.clone_subtree_from_metadata(
+            FUSE_ROOT_ID,
+            SNAPSHOT_DIR_ID,
+            snap_name,
+            false
+        )?;
 
         let timestamp = SystemTime::now();
         let root_id = frozen_root.read().unwrap().id;
-        self.snapshots.write().unwrap().insert(
-            snap_name.to_string(),
-            Snapshot {
-                name: snap_name.to_string(),
-                timestamp,
-                root: frozen_root,
-            },
-        );
+        self.snapshots.write().unwrap().insert(snap_name.to_string(), Snapshot {
+            name: snap_name.to_string(),
+            timestamp,
+            root: frozen_root,
+        });
 
         let unix_timestamp = timestamp
             .duration_since(std::time::UNIX_EPOCH)
@@ -452,13 +422,9 @@ impl BetterFS {
                 child.child_inode_id,
                 FUSE_ROOT_ID,
                 &child.name,
-                true,
+                true
             )?;
-            self.root
-                .write()
-                .unwrap()
-                .children
-                .insert(child.name, cloned_child);
+            self.root.write().unwrap().children.insert(child.name, cloned_child);
         }
 
         Ok(())
@@ -472,23 +438,6 @@ impl BetterFS {
             }
         }
         false
-    }
-
-    fn read_cached_or_load(&self, ino: u64) -> Result<Vec<u8>, String> {
-        if let Some((data, _dirty)) = self.page_cache.read().unwrap().get(&ino).cloned() {
-            self.touch_cache_entry(ino);
-            return Ok(data);
-        }
-
-        let data = self.manager.read_file_by_id(ino).unwrap_or_default();
-        self.write_to_cache(ino, data.clone(), false)?;
-        Ok(data)
-    }
-
-    fn write_to_cache(&self, ino: u64, data: Vec<u8>, is_dirty: bool) -> Result<(), String> {
-        self.page_cache.write().unwrap().insert(ino, (data, is_dirty));
-        self.touch_cache_entry(ino);
-        self.evict_under_pressure()
     }
 
     fn touch_cache_entry(&self, ino: u64) {
@@ -522,8 +471,7 @@ impl BetterFS {
                 return Ok(());
             };
 
-            let is_dirty = self
-                .page_cache
+            let is_dirty = self.page_cache
                 .read()
                 .unwrap()
                 .get(&victim_ino)
@@ -555,10 +503,7 @@ impl BetterFS {
                 self.manager.save_inode(&node)?;
             }
 
-            self.page_cache
-                .write()
-                .unwrap()
-                .insert(ino, (buffer, false));
+            self.page_cache.write().unwrap().insert(ino, (buffer, false));
             self.touch_cache_entry(ino);
         }
 
@@ -575,9 +520,11 @@ impl BetterFS {
 
     fn evict_inode_cache(&self, ino: u64) {
         self.page_cache.write().unwrap().remove(&ino);
-        self.cache_lru.write().unwrap().retain(|id| *id != ino);
+        self.cache_lru
+            .write()
+            .unwrap()
+            .retain(|id| *id != ino);
     }
-
 
     /// Walks the path, applying Copy-on-Write (Shadow Paging) to any shared nodes.
     /// Returns a mutable lock to the final requested file/directory.
@@ -774,16 +721,10 @@ impl BetterFS {
         }
 
         let virtual_ino = self.next_vnode.fetch_add(1, Ordering::Relaxed);
-        self.tag_virtual_dirs.write().unwrap().insert(
-            virtual_ino,
-            TagVirtualDirContext {
-                tags: canonical.clone(),
-            },
-        );
-        self.tag_dir_ids_by_key
-            .write()
-            .unwrap()
-            .insert(key, virtual_ino);
+        self.tag_virtual_dirs.write().unwrap().insert(virtual_ino, TagVirtualDirContext {
+            tags: canonical.clone(),
+        });
+        self.tag_dir_ids_by_key.write().unwrap().insert(key, virtual_ino);
         virtual_ino
     }
 
@@ -796,14 +737,11 @@ impl BetterFS {
         }
 
         let virtual_ino = self.next_vnode.fetch_add(1, Ordering::Relaxed);
-        self.tag_virtual_files.write().unwrap().insert(
-            virtual_ino,
-            TagVirtualFileContext { real_inode_id },
-        );
-        self.tag_file_ids_by_key
+        self.tag_virtual_files
             .write()
             .unwrap()
-            .insert(key, virtual_ino);
+            .insert(virtual_ino, TagVirtualFileContext { real_inode_id });
+        self.tag_file_ids_by_key.write().unwrap().insert(key, virtual_ino);
         virtual_ino
     }
 
@@ -886,11 +824,7 @@ impl BetterFS {
 
         let new_arc = Arc::new(RwLock::new(new_inode));
         if let Some(parent_node) = self.inode_registry.read().unwrap().get(&parent) {
-            parent_node
-                .write()
-                .unwrap()
-                .children
-                .insert(name.to_string(), new_arc.clone());
+            parent_node.write().unwrap().children.insert(name.to_string(), new_arc.clone());
         } else {
             return Err(ENOENT);
         }
@@ -906,9 +840,7 @@ impl BetterFS {
         let candidates = self.manager.get_files_by_tags(&tags).map_err(|_| libc::EIO)?;
         let mut matches = Vec::new();
         for inode_id in candidates {
-            if let Some(inode_name) = self.lookup_live_inode_name(inode_id)
-                && inode_name == name
-            {
+            if let Some(inode_name) = self.lookup_live_inode_name(inode_id) && inode_name == name {
                 matches.push(inode_id);
             }
         }
@@ -989,10 +921,7 @@ impl BetterFS {
         }
 
         if parent == TAGS_DIR_ID {
-            let files = self
-                .manager
-                .get_files_with_tag(name)
-                .map_err(|_| libc::EIO)?;
+            let files = self.manager.get_files_with_tag(name).map_err(|_| libc::EIO)?;
 
             if files.is_empty() {
                 let tags = vec![name.to_string()];
@@ -1012,10 +941,7 @@ impl BetterFS {
             next_tags.push(name.to_string());
             let next_tags = self.canonicalize_tags(next_tags);
 
-            let tag_matches = self
-                .manager
-                .get_files_by_tags(&next_tags)
-                .map_err(|_| libc::EIO)?;
+            let tag_matches = self.manager.get_files_by_tags(&next_tags).map_err(|_| libc::EIO)?;
 
             if !tag_matches.is_empty() {
                 let virtual_ino = self.get_or_create_tag_virtual_dir(&next_tags);
@@ -1026,14 +952,14 @@ impl BetterFS {
                 return Ok(Some((existing, self.tag_dir_attr(existing))));
             }
 
-            let current_matches = self
-                .manager
+            let current_matches = self.manager
                 .get_files_by_tags(&current_tags)
                 .map_err(|_| libc::EIO)?;
             for inode_id in current_matches {
-                if let Some(inode_name) = self.lookup_live_inode_name(inode_id)
-                    && inode_name == name
-                    && let Some(mut attr) = self.lookup_live_inode_attr(inode_id)
+                if
+                    let Some(inode_name) = self.lookup_live_inode_name(inode_id) &&
+                    inode_name == name &&
+                    let Some(mut attr) = self.lookup_live_inode_attr(inode_id)
                 {
                     let virtual_ino = self.get_or_create_tag_virtual_file(&current_tags, inode_id);
                     attr.ino = virtual_ino;
@@ -1064,22 +990,20 @@ impl BetterFS {
                     return Err(EINVAL);
                 }
                 let path = parts[1];
-                let tags: Vec<String> = parts[2..].iter().map(|s| s.to_string()).collect();
-                self.manager
-                    .set_file_tags_by_path(path, tags)
-                    .map_err(|_| libc::EIO)?;
+                let tags: Vec<String> = parts[2..]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                self.manager.set_file_tags_by_path(path, tags).map_err(|_| libc::EIO)?;
                 Ok(())
             }
             "del" => {
                 let path = parts[1];
-                let inode_id = self
-                    .manager
+                let inode_id = self.manager
                     .resolve_inode_by_path(path)
                     .map_err(|_| libc::EIO)?
                     .ok_or(ENOENT)?;
-                self.manager
-                    .delete_file_tags(inode_id)
-                    .map_err(|_| libc::EIO)?;
+                self.manager.delete_file_tags(inode_id).map_err(|_| libc::EIO)?;
                 Ok(())
             }
             _ => Err(EINVAL),
@@ -1087,7 +1011,7 @@ impl BetterFS {
     }
 }
 
-impl Filesystem for BetterFS {
+impl Filesystem for ArcFS {
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_str().unwrap();
 
@@ -1185,9 +1109,10 @@ impl Filesystem for BetterFS {
             return reply.attr(&TTL, &self.tag_dir_attr(ino));
         }
 
-        if self.is_tag_virtual_file_inode(ino)
-            && let Some(real_ino) = self.real_inode_for_virtual_file(ino)
-            && let Some(mut attr) = self.lookup_live_inode_attr(real_ino)
+        if
+            self.is_tag_virtual_file_inode(ino) &&
+            let Some(real_ino) = self.real_inode_for_virtual_file(ino) &&
+            let Some(mut attr) = self.lookup_live_inode_attr(real_ino)
         {
             attr.ino = ino;
             return reply.attr(&TTL, &attr);
@@ -1234,8 +1159,7 @@ impl Filesystem for BetterFS {
                 let _ = reply.add(TAGS_DIR_ID, 0, FileType::Directory, ".");
                 let _ = reply.add(FUSE_ROOT_ID, 1, FileType::Directory, "..");
 
-                let mut top_tags: HashSet<String> = self
-                    .manager
+                let mut top_tags: HashSet<String> = self.manager
                     .get_next_level_tags(&[])
                     .unwrap_or_default()
                     .into_iter()
@@ -1264,8 +1188,7 @@ impl Filesystem for BetterFS {
                 let _ = reply.add(TAGS_DIR_ID, 1, FileType::Directory, "..");
 
                 let mut next_offset = 2i64;
-                let mut next_tags: HashSet<String> = self
-                    .manager
+                let mut next_tags: HashSet<String> = self.manager
                     .get_next_level_tags(&current_tags)
                     .unwrap_or_default()
                     .into_iter()
@@ -1295,10 +1218,15 @@ impl Filesystem for BetterFS {
                     next_offset += 1;
                 }
 
-                let matching_inodes = self.manager.get_files_by_tags(&current_tags).unwrap_or_default();
+                let matching_inodes = self.manager
+                    .get_files_by_tags(&current_tags)
+                    .unwrap_or_default();
                 for inode_id in matching_inodes {
                     if let Some(name) = self.lookup_live_inode_name(inode_id) {
-                        let virtual_ino = self.get_or_create_tag_virtual_file(&current_tags, inode_id);
+                        let virtual_ino = self.get_or_create_tag_virtual_file(
+                            &current_tags,
+                            inode_id
+                        );
                         let _ = reply.add(virtual_ino, next_offset, FileType::RegularFile, name);
                         next_offset += 1;
                     }
@@ -1376,17 +1304,27 @@ impl Filesystem for BetterFS {
 
                 let mut next_offset = 2i64;
                 if ino == FUSE_ROOT_ID {
-                    let _ = reply.add(SNAPSHOT_DIR_ID, next_offset, FileType::Directory, ".snapshots");
+                    let _ = reply.add(
+                        SNAPSHOT_DIR_ID,
+                        next_offset,
+                        FileType::Directory,
+                        ".snapshots"
+                    );
                     next_offset += 1;
                     let _ = reply.add(TAGS_DIR_ID, next_offset, FileType::Directory, "@tags");
                     next_offset += 1;
-                    let _ = reply.add(TAGFS_CONTROL_ID, next_offset, FileType::RegularFile, ".tagfs_ctl");
+                    let _ = reply.add(
+                        TAGFS_CONTROL_ID,
+                        next_offset,
+                        FileType::RegularFile,
+                        ".tagfs_ctl"
+                    );
                     next_offset += 1;
                 }
 
                 for (i, (name, child_arc)) in guard.children.iter().enumerate() {
                     let child = child_arc.read().unwrap();
-                    let _ = reply.add(child.id, next_offset + i as i64, child.attr.kind, name);
+                    let _ = reply.add(child.id, next_offset + (i as i64), child.attr.kind, name);
                 }
             }
             reply.ok();
@@ -1421,46 +1359,51 @@ impl Filesystem for BetterFS {
         }
 
         // 1. Check if the Inode exists in our live registry or snapshots
-        let mut target_recipe = None;
-
-        // Try Live Registry first
         let registry = self.inode_registry.read().unwrap();
-        if registry.contains_key(&target_ino) {
-            // Fetch data directly by Inode ID from the manager
-            target_recipe = Some(self.manager.read_file_by_id(target_ino));
-        } else {
-            // Fallback: Check Snapshots (Chronos)
-            let snaps = self.snapshots.read().unwrap();
-            for (_name, snapshot) in snaps.iter() {
-                if self.find_in_snapshot_tree(&snapshot.root, target_ino).is_some() {
-                    target_recipe = Some(self.manager.read_file_by_id(target_ino));
-                    break;
-                }
-            }
-        }
+        let exists =
+            registry.contains_key(&target_ino) ||
+            ({
+                let snaps = self.snapshots.read().unwrap();
+                snaps
+                    .iter()
+                    .any(|(_name, snapshot)|
+                        self.find_in_snapshot_tree(&snapshot.root, target_ino).is_some()
+                    )
+            });
         drop(registry);
 
-        // 2. Handle the Data Retrieval
-        match target_recipe {
-            Some(Ok(_)) => {
-                let data = self.read_cached_or_load(target_ino).unwrap_or_default();
-                let start = offset as usize;
-                if start < data.len() {
-                    let end = std::cmp::min(start + (size as usize), data.len());
-                    reply.data(&data[start..end]);
-                } else {
-                    // Offset is at or beyond EOF
-                    reply.data(&[]);
-                }
+        if !exists {
+            return reply.error(libc::ENOENT);
+        }
+
+        // 2. Handle the Data Retrieval efficiently
+        // Ensure file is in cache first, without cloning
+        let in_cache = self.page_cache.read().unwrap().contains_key(&target_ino);
+        if !in_cache {
+            if let Ok(data) = self.manager.read_file_by_id(target_ino) {
+                // Populate cache with freshly read data
+                self.page_cache.write().unwrap().insert(target_ino, (data, false));
+                let _ = self.evict_under_pressure();
+            } else {
+                // Return empty if file retrieval fails (e.g. empty file)
+                return reply.data(&[]);
             }
-            Some(Err(_)) => {
-                // File exists in registry but data retrieval failed (e.g. empty file)
+        }
+
+        self.touch_cache_entry(target_ino);
+
+        // Serve directly from the cache reference
+        let cache = self.page_cache.read().unwrap();
+        if let Some((data, _)) = cache.get(&target_ino) {
+            let start = offset as usize;
+            if start < data.len() {
+                let end = std::cmp::min(start + (size as usize), data.len());
+                reply.data(&data[start..end]);
+            } else {
                 reply.data(&[]);
             }
-            None => {
-                // Inode doesn't exist anywhere
-                reply.error(libc::ENOENT);
-            }
+        } else {
+            reply.data(&[]);
         }
     }
 
@@ -1474,7 +1417,7 @@ impl Filesystem for BetterFS {
         _write_flags: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-        reply: ReplyWrite,
+        reply: ReplyWrite
     ) {
         let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
 
@@ -1514,25 +1457,36 @@ impl Filesystem for BetterFS {
             return reply.error(EROFS);
         }
 
-        // 1. Read existing data via page cache (or load from backend)
-        let mut file_data = self.read_cached_or_load(target_ino).unwrap_or_default();
-
-        // 2. Overlay new data
+        // 1. In-place Write: Overlay new data directly into the write cache to prevent O(N^2) memory cloning
         let end = (offset as usize) + data.len();
-        if end > file_data.len() {
-            file_data.resize(end, 0);
-        }
-        file_data[offset as usize..end].copy_from_slice(data);
+        {
+            let mut cache_map = self.page_cache.write().unwrap();
+            let entry = cache_map
+                .entry(target_ino)
+                .or_insert_with(|| {
+                    (self.manager.read_file_by_id(target_ino).unwrap_or_default(), false)
+                });
 
-        // 3. Write-back cache: mark dirty and return success
-        if self.write_to_cache(target_ino, file_data.clone(), true).is_err() {
+            if end > entry.0.len() {
+                entry.0.resize(end, 0);
+            }
+            entry.0[offset as usize..end].copy_from_slice(data);
+            entry.1 = true; // Mark as dirty
+        }
+
+        self.touch_cache_entry(target_ino);
+
+        // 2. Trigger potential eviction if memory pressure is high
+        if self.evict_under_pressure().is_err() {
             return reply.error(libc::EIO);
         }
 
         if let Some(node_arc) = self.inode_registry.read().unwrap().get(&target_ino) {
             let mut node = node_arc.write().unwrap();
-            node.attr.size = file_data.len() as u64;
-            node.attr.blocks = node.attr.size.div_ceil(512);
+            if node.attr.size < (end as u64) {
+                node.attr.size = end as u64;
+                node.attr.blocks = node.attr.size.div_ceil(512);
+            }
             node.attr.mtime = SystemTime::now();
         }
 
@@ -1576,7 +1530,7 @@ impl Filesystem for BetterFS {
         _mode: u32,
         _umask: u32,
         _flags: i32,
-        reply: ReplyCreate,
+        reply: ReplyCreate
     ) {
         if parent == SNAPSHOT_DIR_ID || self.inode_in_snapshot(parent) {
             return reply.error(EROFS);
@@ -1591,26 +1545,33 @@ impl Filesystem for BetterFS {
             return reply.error(EINVAL);
         }
 
-        if self.is_tag_virtual_dir_inode(parent)
-            && let Some(tags) = self.get_virtual_dir_tags(parent)
+        if
+            self.is_tag_virtual_dir_inode(parent) &&
+            let Some(tags) = self.get_virtual_dir_tags(parent)
         {
             match self.ensure_real_path_for_tags(&tags) {
                 Ok(parent_ino) => {
                     real_parent = parent_ino;
                     virtual_tags = Some(tags);
                 }
-                Err(code) => return reply.error(code),
+                Err(code) => {
+                    return reply.error(code);
+                }
             }
         }
 
         let new_id = match self.create_live_file_under_parent(real_parent, &name_str) {
             Ok(id) => id,
-            Err(code) => return reply.error(code),
+            Err(code) => {
+                return reply.error(code);
+            }
         };
 
         let mut attr = match self.lookup_live_inode_attr(new_id) {
             Some(a) => a,
-            None => return reply.error(libc::EIO),
+            None => {
+                return reply.error(libc::EIO);
+            }
         };
 
         if let Some(tags) = virtual_tags {
@@ -1641,8 +1602,9 @@ impl Filesystem for BetterFS {
             return reply.entry(&TTL, &self.tag_dir_attr(virtual_ino), 0);
         }
 
-        if self.is_tag_virtual_dir_inode(parent)
-            && let Some(mut tags) = self.get_virtual_dir_tags(parent)
+        if
+            self.is_tag_virtual_dir_inode(parent) &&
+            let Some(mut tags) = self.get_virtual_dir_tags(parent)
         {
             tags.push(name_str.to_string());
             let canonical = self.canonicalize_tags(tags);
@@ -1667,7 +1629,6 @@ impl Filesystem for BetterFS {
 
             let snap_exists = self.snapshots.read().unwrap().contains_key(snap_name);
             if snap_exists {
-
                 // Auto-backup current state before restore
                 let backup_name = format!(
                     "before_restore_{}",
@@ -1679,7 +1640,11 @@ impl Filesystem for BetterFS {
                 println!("[CHRONOS] Auto-saving current state as '{}'", backup_name);
 
                 if let Err(e) = self.create_snapshot_named(&backup_name) {
-                    println!("[CHRONOS] Error: Failed to create backup snapshot '{}': {}", backup_name, e);
+                    println!(
+                        "[CHRONOS] Error: Failed to create backup snapshot '{}': {}",
+                        backup_name,
+                        e
+                    );
                     return reply.error(libc::EIO);
                 }
 
@@ -1783,10 +1748,20 @@ impl Filesystem for BetterFS {
         }
 
         if let Some(new_size) = size {
-            let mut file_data = self.read_cached_or_load(target_ino).unwrap_or_default();
-            file_data.resize(new_size as usize, 0);
+            // Modify size in-place cache to prevent monolithic clones
+            {
+                let mut cache_map = self.page_cache.write().unwrap();
+                let entry = cache_map
+                    .entry(target_ino)
+                    .or_insert_with(|| {
+                        (self.manager.read_file_by_id(target_ino).unwrap_or_default(), false)
+                    });
+                entry.0.resize(new_size as usize, 0);
+                entry.1 = true;
+            }
 
-            if self.write_to_cache(target_ino, file_data, true).is_err() {
+            self.touch_cache_entry(target_ino);
+            if self.evict_under_pressure().is_err() {
                 return reply.error(libc::EIO);
             }
 
@@ -1797,7 +1772,7 @@ impl Filesystem for BetterFS {
                 node.attr.mtime = SystemTime::now();
             }
         }
-        
+
         // Always return the current attributes
         self.getattr(_req, ino, reply);
     }
@@ -1814,14 +1789,7 @@ impl Filesystem for BetterFS {
         reply.opened(0, 0);
     }
 
-    fn fsync(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        _datasync: bool,
-        reply: ReplyEmpty,
-    ) {
+    fn fsync(&mut self, _req: &Request, ino: u64, _fh: u64, _datasync: bool, reply: ReplyEmpty) {
         if self.is_tag_virtual_dir_inode(ino) {
             return reply.error(EROFS);
         }
@@ -1866,7 +1834,9 @@ impl Filesystem for BetterFS {
         if self.is_tag_virtual_dir_inode(parent) {
             let real_ino = match self.resolve_real_file_in_tag_dir(parent, name_str) {
                 Ok(ino) => ino,
-                Err(code) => return reply.error(code),
+                Err(code) => {
+                    return reply.error(code);
+                }
             };
 
             let (real_parent, real_name) = {
@@ -1881,7 +1851,9 @@ impl Filesystem for BetterFS {
             let registry = self.inode_registry.read().unwrap();
             let parent_node = match registry.get(&real_parent) {
                 Some(node) => node.clone(),
-                None => return reply.error(ENOENT),
+                None => {
+                    return reply.error(ENOENT);
+                }
             };
             drop(registry);
 

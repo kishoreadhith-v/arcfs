@@ -1,0 +1,152 @@
+{
+  "seq_write": {
+    "ext4_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 462.92947483062744,
+      "read_iops": 0.0,
+      "write_iops": 462.929476,
+      "write_lat_ms": 2.153138995605
+    },
+    "bindfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 1296.2025308609009,
+      "read_iops": 0.0,
+      "write_iops": 1296.202532,
+      "write_lat_ms": 0.765305353027
+    },
+    "btrfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 197.5689754486084,
+      "read_iops": 0.0,
+      "write_iops": 197.568975,
+      "write_lat_ms": 5.044852407715
+    },
+    "arcfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 4275.574111938477,
+      "read_iops": 0.0,
+      "write_iops": 4275.574113,
+      "write_lat_ms": 0.229819047363
+    }
+  },
+  "rand_write": {
+    "ext4_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 123.12131690979004,
+      "read_iops": 0.0,
+      "write_iops": 31519.057352,
+      "write_lat_ms": 0.031177559753
+    },
+    "bindfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 73.76458644866943,
+      "read_iops": 0.0,
+      "write_iops": 18883.734332,
+      "write_lat_ms": 0.052556981304
+    },
+    "btrfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 58.33428192138672,
+      "read_iops": 0.0,
+      "write_iops": 14933.576393,
+      "write_lat_ms": 0.06646844497700001
+    },
+    "arcfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 387.2919816970825,
+      "read_iops": 0.0,
+      "write_iops": 99146.747352,
+      "write_lat_ms": 0.009786841396
+    }
+  },
+  "realistic_mix": {
+    "ext4_mount": {
+      "read_bw_mb": 556.9930229187012,
+      "write_bw_mb": 225.88159370422363,
+      "read_iops": 9524.464832,
+      "write_iops": 4056.574924,
+      "write_lat_ms": 0.08146540049
+    },
+    "bindfs_mount": {
+      "read_bw_mb": 622.1578769683838,
+      "write_bw_mb": 252.3083896636963,
+      "read_iops": 10638.770282,
+      "write_iops": 4531.16994,
+      "write_lat_ms": 0.104222701658
+    },
+    "btrfs_mount": {
+      "read_bw_mb": 551.0944585800171,
+      "write_bw_mb": 223.48950386047363,
+      "read_iops": 9423.600605,
+      "write_iops": 4013.615734,
+      "write_lat_ms": 0.081476949868
+    },
+    "arcfs_mount": {
+      "read_bw_mb": 1319.8312950134277,
+      "write_bw_mb": 535.2411680221558,
+      "read_iops": 22568.84058,
+      "write_iops": 9612.318841,
+      "write_lat_ms": 0.037238333772999996
+    }
+  },
+  "massive_stream": {
+    "ext4_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 96.85733795166016,
+      "read_iops": 0.0,
+      "write_iops": 24795.47873,
+      "write_lat_ms": 0.039292390361999996
+    },
+    "bindfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 63.09109306335449,
+      "read_iops": 0.0,
+      "write_iops": 16151.320046,
+      "write_lat_ms": 0.060790746598999995
+    },
+    "btrfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 61.59120559692383,
+      "read_iops": 0.0,
+      "write_iops": 15767.348841,
+      "write_lat_ms": 0.062429128979
+    },
+    "arcfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 665.5833597183228,
+      "read_iops": 0.0,
+      "write_iops": 170389.340266,
+      "write_lat_ms": 0.00519509565
+    }
+  },
+  "paranoid_db": {
+    "ext4_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 1.4575681686401367,
+      "read_iops": 0.0,
+      "write_iops": 373.137592,
+      "write_lat_ms": 0.040415270211000005
+    },
+    "bindfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 3.8866043090820312,
+      "read_iops": 0.0,
+      "write_iops": 994.970734,
+      "write_lat_ms": 0.030152640805
+    },
+    "btrfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 1.1315698623657227,
+      "read_iops": 0.0,
+      "write_iops": 289.681893,
+      "write_lat_ms": 0.050114775867
+    },
+    "arcfs_mount": {
+      "read_bw_mb": 0.0,
+      "write_bw_mb": 3.4894752502441406,
+      "read_iops": 0.0,
+      "write_iops": 893.30579,
+      "write_lat_ms": 0.020261872242
+    }
+  }
+}

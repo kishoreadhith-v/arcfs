@@ -1,8 +1,8 @@
 // src/main.rs
 use clap::{ Parser, Subcommand };
-use better_fs::chunker::chunk_lengths;
-use better_fs::file_manager::{FileKind, FileManager};
-use better_fs::fuse_handler;
+use arcfs::chunker::chunk_lengths;
+use arcfs::file_manager::{FileKind, FileManager};
+use arcfs::fuse_handler;
 use std::fs;
 use std::io::Write; // Needed for flushing output
 use std::path::PathBuf;
@@ -10,26 +10,28 @@ use std::path::PathBuf;
 
 // 1. Define the Command Line Interface (CLI)
 #[derive(Parser)]
-#[command(name = "BetterFS")]
+#[command(name = "ArcFS")]
 #[command(about = "A deduplicating, content-addressable filesystem", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+    #[arg(long, default_value = "./my_storage")]
+    storage_dir: PathBuf,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Save a file to BetterFS
+    /// Save a file to ArcFS
     Write {
         /// The path to the file you want to upload
         file_path: PathBuf,
     },
-    /// Read a file back from BetterFS
+    /// Read a file back from ArcFS
     Read {
-        /// The name of the file inside BetterFS
+        /// The name of the file inside ArcFS
         file_name: String,
     },
-    /// List all files stored in BetterFS
+    /// List all files stored in ArcFS
     List,
     Mount {
         /// The folder to mount to (e.g., ./mnt)
@@ -55,7 +57,7 @@ enum Commands {
     },
     /// Set/replace tags for a file using a live path like docs/sub/report.txt
     TagSetPath {
-        /// Path relative to BetterFS root (without mount prefix)
+        /// Path relative to ArcFS root (without mount prefix)
         path: String,
         /// Tags to set (space-separated)
         tags: Vec<String>,
@@ -97,8 +99,8 @@ fn main() {
 
     // Initialize the engine in a folder named "my_storage"
     // This creates a permanent database on your disk.
-    let storage_path = "./my_storage";
-    let manager = FileManager::new(storage_path);
+    let storage_path = args.storage_dir;
+    let manager = FileManager::new(storage_path.to_str().unwrap());
 
     match args.command {
         Commands::Write { file_path } => {
@@ -113,7 +115,7 @@ fn main() {
 
             let filename = file_path.file_name().unwrap().to_str().unwrap();
 
-            // 2. Ingest it into BetterFS
+            // 2. Ingest it into ArcFS
             println!("Writing '{}' ({} bytes)...", filename, data.len());
             match manager.write_file(filename, &data) {
                 Ok(_) => println!("Success! Saved as '{}'", filename),
@@ -121,7 +123,7 @@ fn main() {
             }
         }
         Commands::Read { file_name } => {
-            // 1. Ask BetterFS for the bytes
+            // 1. Ask ArcFS for the bytes
             match manager.read_file(&file_name) {
                 Ok(data) => {
                     // 2. Write to Standard Output (so you can pipe it)
@@ -135,14 +137,14 @@ fn main() {
             if files.is_empty() {
                 println!("No files found in storage.");
             } else {
-                println!("Files in BetterFS:");
+                println!("Files in ArcFS:");
                 for file in files {
                     println!(" - {}", file);
                 }
             }
         }
         Commands::Mount { mount_point } => {
-            println!("Mounting BetterFS to {}...", mount_point);
+            println!("Mounting ArcFS to {}...", mount_point);
             println!("(Press Ctrl+C to unmount)");
 
             // Ensure the mount point exists
@@ -152,11 +154,11 @@ fn main() {
             let options = vec![
                 fuser::MountOption::RW, // Read-Only
                 fuser::MountOption::AllowOther,
-                fuser::MountOption::FSName("betterfs".to_string()),
+                fuser::MountOption::FSName("arcfs".to_string()),
                 fuser::MountOption::AutoUnmount // Helps clean up on exit
             ];
 
-            let fs_impl = fuse_handler::BetterFS::new(manager);
+            let fs_impl = fuse_handler::ArcFS::new(manager);
 
             fuser::mount2(fs_impl, mount_point, &options).unwrap();
         }

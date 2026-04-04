@@ -1,6 +1,10 @@
 #!/bin/bash
+set -e
 
 RESULTS_DIR="$(pwd)/benchmarks/results"
+CLASSES=("responsive" "durable")
+JOBS=("seq_write" "rand_write" "realistic_mix" "massive_stream" "paranoid_db")
+MOUNTS=("ext4_mount" "bindfs_mount" "btrfs_mount" "arcfs_mount")
 
 echo "========================================"
 echo "📝 Benchmark Results Validation Report"
@@ -11,51 +15,67 @@ if [ ! -d "$RESULTS_DIR" ]; then
     exit 1
 fi
 
-function extract_metric {
+if ! command -v jq > /dev/null 2>&1; then
+    echo "[!] ERROR: jq is required. Install with: sudo apt install jq"
+    exit 1
+fi
+
+get_metric() {
+    local file=$1
+    local query=$2
+    jq -r "$query // 0" "$file"
+}
+
+validate_depth_fairness() {
     local job=$1
-    local mount=$2
-    local query=$3
-    local label=$4
-    local unit=$5
-    
-    local file="${RESULTS_DIR}/${job}_${mount}.json"
-    if [ -f "$file" ]; then
-        local value=$(jq "$query" "$file")
-        echo -e "  ✅ $mount:\t$label: $value $unit"
-    else
-        echo -e "  ❌ $mount:\tMissing data file!"
+    local file=$2
+
+    if [[ "$job" == "rand_write" || "$job" == "realistic_mix" || "$job" == "paranoid_db" ]]; then
+        local depth1
+        depth1=$(get_metric "$file" '.jobs[0].iodepth_level["1"]')
+        awk -v d="$depth1" 'BEGIN {
+            if (d > 80.0) {
+                printf("  ⚠️  effective iodepth looks shallow: depth=1 is %.2f%%\n", d)
+            }
+        }'
     fi
 }
 
-echo ""
-echo "1. Sequential Write Throughput (Goal: Measure max bandwidth)"
-extract_metric "seq_write" "ext4_mount" '.jobs[0].write.bw' "Bandwidth" "KiB/s"
-extract_metric "seq_write" "btrfs_mount" '.jobs[0].write.bw' "Bandwidth" "KiB/s"
+for class in "${CLASSES[@]}"; do
+    echo ""
+    echo "========================================"
+    echo "Class: $class"
+    echo "========================================"
 
-echo ""
-echo "2. Random Write IOPS & Latency (Goal: Extract IOPS and clat_ns)"
-extract_metric "rand_write" "ext4_mount" '.jobs[0].write.iops' "IOPS" "ops/sec"
-extract_metric "rand_write" "ext4_mount" '.jobs[0].write.clat_ns.mean' "Mean Latency" "ns"
-extract_metric "rand_write" "btrfs_mount" '.jobs[0].write.iops' "IOPS" "ops/sec"
-extract_metric "rand_write" "btrfs_mount" '.jobs[0].write.clat_ns.mean' "Mean Latency" "ns"
+    for job in "${JOBS[@]}"; do
+        echo ""
+        echo "--- $job ---"
+        for mount in "${MOUNTS[@]}"; do
+            file="${RESULTS_DIR}/${class}/${mount}/${job}_${class}_${mount}.json"
 
-echo ""
-echo "3. Realistic Mix (Goal: Test Bimodal workloads)"
-extract_metric "realistic_mix" "ext4_mount" '.jobs[0].read.bw' "Read BW" "KiB/s"
-extract_metric "realistic_mix" "ext4_mount" '.jobs[0].write.bw' "Write BW" "KiB/s"
-extract_metric "realistic_mix" "btrfs_mount" '.jobs[0].read.bw' "Read BW" "KiB/s"
-extract_metric "realistic_mix" "btrfs_mount" '.jobs[0].write.bw' "Write BW" "KiB/s"
+            if [ ! -f "$file" ]; then
+                echo "  ❌ $mount: missing ${job}_${class}_${mount}.json"
+                continue
+            fi
 
-echo ""
-echo "4. Massive Stream (Goal: Memory Pressure / Cache test)"
-extract_metric "massive_stream" "ext4_mount" '.jobs[0].write.bw' "Bandwidth" "KiB/s"
-extract_metric "massive_stream" "btrfs_mount" '.jobs[0].write.bw' "Bandwidth" "KiB/s"
+            write_bw_mb=$(get_metric "$file" '.jobs[0].write.bw_bytes / 1024 / 1024')
+            read_bw_mb=$(get_metric "$file" '.jobs[0].read.bw_bytes / 1024 / 1024')
+            write_iops=$(get_metric "$file" '.jobs[0].write.iops')
+            read_iops=$(get_metric "$file" '.jobs[0].read.iops')
+            p99_ms=$(get_metric "$file" '.jobs[0].write.clat_ns.percentile["99.000000"] / 1000000')
+            p999_ms=$(get_metric "$file" '.jobs[0].write.clat_ns.percentile["99.900000"] / 1000000')
+            mean_ms=$(get_metric "$file" '.jobs[0].write.clat_ns.mean / 1000000')
+            runtime_ms=$(get_metric "$file" '.jobs[0].job_runtime')
+            usr_cpu=$(get_metric "$file" '.jobs[0].usr_cpu')
+            sys_cpu=$(get_metric "$file" '.jobs[0].sys_cpu')
 
-echo ""
-echo "5. Paranoid DB Strict ACID (Goal: fsync overhead)"
-extract_metric "paranoid_db" "ext4_mount" '.jobs[0].write.iops' "IOPS" "ops/sec"
-extract_metric "paranoid_db" "btrfs_mount" '.jobs[0].write.iops' "IOPS" "ops/sec"
+            echo "  ✅ $mount: bw_w=${write_bw_mb}MB/s bw_r=${read_bw_mb}MB/s iops_w=${write_iops} iops_r=${read_iops} lat_mean=${mean_ms}ms p99=${p99_ms}ms p99.9=${p999_ms}ms runtime=${runtime_ms}ms cpu=${usr_cpu}+${sys_cpu}%"
+
+            validate_depth_fairness "$job" "$file"
+        done
+    done
+done
 
 echo ""
 echo "========================================"
-echo "Data Validation Complete!"
+echo "Data Validation Complete (2-class suite)!"

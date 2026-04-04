@@ -1,5 +1,8 @@
 # BetterFS: Master Architectural Specification & RFC
 
+> **CRITICAL AGENT INSTRUCTION:**
+> NEVER use terminal utilities (e.g., `grep`, `cat`, `sed`, `awk`) to read, search, or edit files. YOU MUST strictly use the native API tools provided to you (e.g., `read_file`, `replace_string_in_file`, `create_file`, `grep_search`).
+
 ## 1. System Topology & Layering
 BetterFS is a user-space filesystem operating via FUSE. The architecture is strictly divided into four isolated layers. High-level layers may call low-level layers, but NEVER vice versa.
 1. **FUSE Interface Layer (`fuse_handler.rs`)**: Translates kernel VFS calls into BetterFS operations. Handles path-to-inode resolution and POSIX permission checks.
@@ -68,3 +71,43 @@ To prevent deadlocks under heavy multithreaded FUSE workloads, locks MUST be acq
 ## 6. Failure Domains & ACID Guarantees
 - **Crash Consistency**: The `sled` database guarantees atomic flushes. If power is lost before `release()` completes, the `dirty` page cache is lost, but the underlying metadata and previous disk state remain perfectly consistent. Orphaned chunks in the CAS pool are ignored until the offline Garbage Collector runs.
 - **Orphan Resolution**: At startup (`hydrate_tree`), the system relies exclusively on the `dirent:{parent}:{name}` edges to reconstruct the namespace graph. Unlinked `meta:{inode}` entries without a parent `dirent` are swept.
+
+## Phase: Benchmarking & Performance Validation (Master Suite)
+
+### 1. Environment & Safety Constraints (Strict)
+* **The Arena Location:** NEVER use `/tmp` for loopback devices or heavy I/O testing. It mounts as a memory-capped `tmpfs` and will cause an Out-Of-Memory (OOM) crash. All benchmarks MUST be executed in a persistent directory on the SSD (e.g., `~/benchmark_arena`).
+* **Cache Bypassing:** All `fio` scripts MUST include `direct=1` to bypass the Linux VFS page cache. We must measure true filesystem I/O, not RAM speed.
+* **The Comparables:** The control baseline is `ext4` (measures raw throughput and speed limit). The direct architectural competitor is `btrfs` (measures CoW and snapshot latency).
+
+### 2. The Loopback Arena Setup
+Establish 5GB loopback devices to ensure complete system isolation:
+1.  **Allocate:** `dd if=/dev/zero of=<fs>_disk.img bs=1M count=5120`
+2.  **Format:** `mkfs.ext4` and `mkfs.btrfs`
+3.  **Mount:** `mount -o loop <image> <mount_dir>`
+4.  **Permissions:** `chown -R $USER:$USER <mount_dir>`
+
+### 3. The `fio` Micro-Benchmark Matrix
+Generate and execute these specific `.fio` configurations. Export results using `--output-format=json`.
+* **`seq_write.fio` (Throughput Penalty):** `rw=write`, `bs=1M`, `size=2G`. 
+    * *Goal:* Measure the maximum bandwidth (`bw`) penalty introduced by the CDC/Hashing/Compression pipeline against Ext4.
+* **`rand_write.fio` (Metadata IOPS):** `rw=randwrite`, `bs=4K`, `size=1G`, `iodepth=32`. 
+    * *Goal:* Stress the `sled` database transaction overhead. Extract mean completion latency (`clat_ns`).
+* **`realistic_mix.fio` (Bimodal Workload):** `rw=randrw`, `rwmixread=70`, `bssplit=4k/50:64k/30:1m/20`. 
+    * *Goal:* Test dynamic chunking adaptation under a realistic 70/30 read/write split.
+* **`massive_stream.fio` (LRU Cache Test):** `rw=write`, `size=4G`, `buffer_compress_percentage=0`, `refill_buffers=1`.
+    * *Goal:* Ingest 4GB of incompressible data to test the `VecDeque` LRU eviction pipeline under sustained memory pressure without OOMing.
+* **`paranoid_db.fio` (Strict ACID/fsync):** `rw=randwrite`, `bs=4k`, `size=500M`, `fsync=1`.
+    * *Goal:* Force a physical disk flush on every single write to prove the filesystem handles synchronous safety constraints without deadlocking.
+
+### 4. Advanced Profiling & Degradation
+* **Resource Profiling (The FUSE Tax):** During the `massive_stream` and `realistic_mix` tests on ArcFS, monitor the daemon's CPU and RAM footprint using: `pidstat -r -u -p $(pgrep better-fs) 1`. Record the P99 RAM usage to prove the LRU cache holds steady.
+* **The Aged Filesystem Test:** Before running the final `realistic_mix`, fill the drive to 85% capacity with duplicated files, then randomly delete half of them. This fragments the Sled DB and CAS directory, proving lookup latency doesn't degrade logarithmically over time.
+
+### 5. The Macro-Benchmark (Linux Kernel Extraction)
+1.  **The Payload:** Download a recent Linux Kernel source tarball (`.tar.xz`).
+2.  **Metadata Stress (Write):** Time the extraction (`time tar -xf...`) to measure the speed of rapid inode/dirent creation (approx. 80,000 tiny files).
+3.  **Traversal Speed (Read):** Drop OS caches (`echo 3 | sudo tee /proc/sys/vm/drop_caches`), then time a full tree traversal (`time find <dir> -type f | wc -l`) to measure metadata read latency.
+
+### 6. Snapshot Latency & Giant File Deduplication
+* **CoW Latency:** Time `btrfs subvolume snapshot` against the ArcFS snapshot trigger (`time mkdir .snap_v1`) under active I/O load.
+* **The VM Clone Test:** Copy a real 3GB+ `.iso` or `.qcow2` image into the drive. Verify near-instant completion time and use `du -sh` on the backend directory to prove zero additional physical space was consumed.

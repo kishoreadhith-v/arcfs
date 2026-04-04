@@ -62,7 +62,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "better-fs"
+name = "arcfs"
 version = "0.1.0"
 dependencies = [
  "bincode",

@@ -7,7 +7,7 @@ echo "========================================"
 echo " Allocating Benchmark Arena Loopbacks"
 echo "========================================"
 
-mkdir -p "$ARENA_DIR"/{ext4_mount,btrfs_mount,betterfs_mount,betterfs_backend}
+mkdir -p "$ARENA_DIR"/{ext4_mount,btrfs_mount,arcfs_mount,arcfs_backend}
 cd "$ARENA_DIR"
 
 if [ ! -f "ext4_disk.img" ]; then
@@ -46,7 +46,7 @@ echo "========================================"
 echo " Setting Permissions"
 echo "========================================"
 sudo chown -R $USER:$USER "$ARENA_DIR"
-sudo chmod -R 777 "$ARENA_DIR/ext4_mount" "$ARENA_DIR/btrfs_mount" "$ARENA_DIR/betterfs_mount" "$ARENA_DIR/betterfs_backend"
+sudo chmod -R 777 "$ARENA_DIR/ext4_mount" "$ARENA_DIR/btrfs_mount" "$ARENA_DIR/arcfs_mount" "$ARENA_DIR/arcfs_backend"
 
 echo "[+] Arena setup complete! Ready for FIO."
 df -h | grep _mount
