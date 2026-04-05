@@ -1,4 +1,4 @@
-# BetterFS Benchmark Report (Final)
+# ArcFS Benchmark Report (Final)
 
 ## 1. Scope
 
@@ -6,7 +6,7 @@ This report summarizes the final benchmark campaign across:
 - `ext4` (kernel baseline)
 - `btrfs` (kernel CoW baseline)
 - `bindfs` (FUSE pass-through baseline)
-- `arcfs` (BetterFS)
+- `arcfs` (ArcFS)
 
 The suite is split into three result classes:
 - **Responsive class**: acceptance-path performance under realistic asynchronous operation.

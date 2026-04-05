@@ -1,7 +1,7 @@
 // src/main.rs
 use clap::{ Parser, Subcommand };
 use arcfs::chunker::chunk_lengths;
-use arcfs::file_manager::{FileKind, FileManager};
+use arcfs::file_manager::{ FileKind, FileManager };
 use arcfs::fuse_handler;
 use std::fs;
 use std::io::Write; // Needed for flushing output
@@ -89,7 +89,7 @@ fn percentile(sorted: &[usize], p: f64) -> usize {
         return 0;
     }
 
-    let rank = ((sorted.len() - 1) as f64 * p).round() as usize;
+    let rank = (((sorted.len() - 1) as f64) * p).round() as usize;
     sorted[rank.min(sorted.len() - 1)]
 }
 
@@ -189,7 +189,7 @@ fn main() {
             match manager.run_gc() {
                 Ok(count) => println!("Successfully removed {} orphaned chunks.", count),
                 Err(e) => eprintln!("GC Failed: {}", e),
-            },
+            }
 
         Commands::CdcStats { file_path } => {
             let data = match fs::read(&file_path) {
@@ -210,7 +210,7 @@ fn main() {
             sorted.sort_unstable();
 
             let total_bytes: usize = sizes.iter().sum();
-            let avg = total_bytes as f64 / sizes.len() as f64;
+            let avg = (total_bytes as f64) / (sizes.len() as f64);
             let min = *sorted.first().unwrap_or(&0);
             let max = *sorted.last().unwrap_or(&0);
 
@@ -219,16 +219,12 @@ fn main() {
             println!("- chunks: {}", sizes.len());
             println!("- avg: {:.2}", avg);
             println!("- min: {}", min);
-            println!("- p50: {}", percentile(&sorted, 0.50));
-            println!("- p90: {}", percentile(&sorted, 0.90));
+            println!("- p50: {}", percentile(&sorted, 0.5));
+            println!("- p90: {}", percentile(&sorted, 0.9));
             println!("- p99: {}", percentile(&sorted, 0.99));
             println!("- max: {}", max);
         }
-        Commands::TagSet {
-            inode_id,
-            filename,
-            tags,
-        } => {
+        Commands::TagSet { inode_id, filename, tags } => {
             if tags.is_empty() {
                 eprintln!("Error: provide at least one tag");
                 return;
@@ -250,16 +246,17 @@ fn main() {
                 Err(e) => eprintln!("Error: {}", e),
             }
         }
-        Commands::TagGet { inode_id } => match manager.get_file_tags(inode_id) {
-            Ok(tags) => {
-                if tags.is_empty() {
-                    println!("No tags for inode {}", inode_id);
-                } else {
-                    println!("inode {} tags: {}", inode_id, tags.join(", "));
+        Commands::TagGet { inode_id } =>
+            match manager.get_file_tags(inode_id) {
+                Ok(tags) => {
+                    if tags.is_empty() {
+                        println!("No tags for inode {}", inode_id);
+                    } else {
+                        println!("inode {} tags: {}", inode_id, tags.join(", "));
+                    }
                 }
+                Err(e) => eprintln!("Error: {}", e),
             }
-            Err(e) => eprintln!("Error: {}", e),
-        },
         Commands::TagQuery { tags } => {
             if tags.is_empty() {
                 eprintln!("Error: provide at least one tag");
@@ -277,19 +274,21 @@ fn main() {
                 Err(e) => eprintln!("Error: {}", e),
             }
         }
-        Commands::TagNext { tags } => match manager.get_next_level_tags(&tags) {
-            Ok(next) => {
-                if next.is_empty() {
-                    println!("No next-level tags");
-                } else {
-                    println!("Next tags: {}", next.join(", "));
+        Commands::TagNext { tags } =>
+            match manager.get_next_level_tags(&tags) {
+                Ok(next) => {
+                    if next.is_empty() {
+                        println!("No next-level tags");
+                    } else {
+                        println!("Next tags: {}", next.join(", "));
+                    }
                 }
+                Err(e) => eprintln!("Error: {}", e),
             }
-            Err(e) => eprintln!("Error: {}", e),
-        },
-        Commands::TagDelete { inode_id } => match manager.delete_file_tags(inode_id) {
-            Ok(_) => println!("Deleted tags for inode {}", inode_id),
-            Err(e) => eprintln!("Error: {}", e),
-        },
+        Commands::TagDelete { inode_id } =>
+            match manager.delete_file_tags(inode_id) {
+                Ok(_) => println!("Deleted tags for inode {}", inode_id),
+                Err(e) => eprintln!("Error: {}", e),
+            }
     }
 }

@@ -4,8 +4,8 @@ set -u
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-8}"
 MOUNT_DIR="${MOUNT_DIR:-mnt}"
 STORAGE_DIR="${STORAGE_DIR:-my_storage}"
-BIN_PATH="${BIN_PATH:-target/debug/better-fs}"
-LOG_FILE="${LOG_FILE:-/tmp/betterfs-regression.log}"
+BIN_PATH="${BIN_PATH:-target/debug/arcfs}"
+LOG_FILE="${LOG_FILE:-/tmp/arcfs-regression.log}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -51,12 +51,12 @@ must() {
 
     fail "$description"
     echo "      cmd: $cmd"
-    run_sh "$cmd" >/tmp/betterfs_cmd_stdout.log 2>/tmp/betterfs_cmd_stderr.log || true
-    if [[ -s /tmp/betterfs_cmd_stderr.log ]]; then
-        sed 's/^/      stderr: /' /tmp/betterfs_cmd_stderr.log
+    run_sh "$cmd" >/tmp/arcfs_cmd_stdout.log 2>/tmp/arcfs_cmd_stderr.log || true
+    if [[ -s /tmp/arcfs_cmd_stderr.log ]]; then
+        sed 's/^/      stderr: /' /tmp/arcfs_cmd_stderr.log
     fi
-    if [[ -s /tmp/betterfs_cmd_stdout.log ]]; then
-        sed 's/^/      stdout: /' /tmp/betterfs_cmd_stdout.log
+    if [[ -s /tmp/arcfs_cmd_stdout.log ]]; then
+        sed 's/^/      stdout: /' /tmp/arcfs_cmd_stdout.log
     fi
     return 1
 }
@@ -92,26 +92,26 @@ assert_snapshot_readonly() {
     local description="$1"
     local file_path="$2"
 
-    if run_sh "(echo 'mutate' > '$file_path')" >/tmp/betterfs_ro_out.log 2>/tmp/betterfs_ro_err.log; then
+    if run_sh "(echo 'mutate' > '$file_path')" >/tmp/arcfs_ro_out.log 2>/tmp/arcfs_ro_err.log; then
         fail "$description (write unexpectedly succeeded)"
         return 1
     fi
 
-    if grep -qi "read-only file system\|permission denied" /tmp/betterfs_ro_err.log; then
+    if grep -qi "read-only file system\|permission denied" /tmp/arcfs_ro_err.log; then
         pass "$description"
         return 0
     fi
 
     fail "$description (write failed but not due to read-only semantics)"
-    sed 's/^/      stderr: /' /tmp/betterfs_ro_err.log
+    sed 's/^/      stderr: /' /tmp/arcfs_ro_err.log
     return 1
 }
 
 start_fs() {
-    info "Starting BetterFS mount"
+    info "Starting ArcFS mount"
 
-    pkill -x better-fs >/dev/null 2>&1 || true
-    pkill -f "target/debug/better-fs mount ${MOUNT_DIR}" >/dev/null 2>&1 || true
+    pkill -x arcfs >/dev/null 2>&1 || true
+    pkill -f "target/debug/arcfs mount ${MOUNT_DIR}" >/dev/null 2>&1 || true
     fusermount -u "${MOUNT_DIR}" >/dev/null 2>&1 || true
     mkdir -p "${MOUNT_DIR}"
 
@@ -140,8 +140,8 @@ stop_fs() {
         wait "$FS_PID" >/dev/null 2>&1 || true
     fi
 
-    pkill -x better-fs >/dev/null 2>&1 || true
-    pkill -f "target/debug/better-fs mount ${MOUNT_DIR}" >/dev/null 2>&1 || true
+    pkill -x arcfs >/dev/null 2>&1 || true
+    pkill -f "target/debug/arcfs mount ${MOUNT_DIR}" >/dev/null 2>&1 || true
     sleep 1
     FS_PID=""
 }
@@ -233,14 +233,14 @@ main() {
 
     info "Running metadata/maintenance checks"
     stop_fs
-    pkill -x better-fs >/dev/null 2>&1 || true
+    pkill -x arcfs >/dev/null 2>&1 || true
     sleep 1
 
-    must "inspect command succeeds" "'${BIN_PATH}' inspect > /tmp/betterfs_inspect.out"
-    must "metadata includes ino_meta namespace" "grep -q 'ino_meta:' /tmp/betterfs_inspect.out"
-    must "metadata includes ino_recipe namespace" "grep -q 'ino_recipe:' /tmp/betterfs_inspect.out"
-    must "metadata includes dirent namespace" "grep -q 'dirent:' /tmp/betterfs_inspect.out"
-    must "gc command executes" "'${BIN_PATH}' gc >/tmp/betterfs_gc.out"
+    must "inspect command succeeds" "'${BIN_PATH}' inspect > /tmp/arcfs_inspect.out"
+    must "metadata includes ino_meta namespace" "grep -q 'ino_meta:' /tmp/arcfs_inspect.out"
+    must "metadata includes ino_recipe namespace" "grep -q 'ino_recipe:' /tmp/arcfs_inspect.out"
+    must "metadata includes dirent namespace" "grep -q 'dirent:' /tmp/arcfs_inspect.out"
+    must "gc command executes" "'${BIN_PATH}' gc >/tmp/arcfs_gc.out"
 
     report
 
@@ -252,7 +252,7 @@ main() {
 report() {
     echo
     echo "========================================"
-    echo "BetterFS Regression E2E Report"
+    echo "ArcFS Regression E2E Report"
     echo "========================================"
     echo "Pass: ${PASS_COUNT}"
     echo "Fail: ${FAIL_COUNT}"

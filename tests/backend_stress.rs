@@ -1,6 +1,6 @@
 // tests/backend_stress.rs
 
-use better_fs::file_manager::FileManager;
+use arcfs::file_manager::FileManager;
 use std::fs;
 use std::path::Path;
 

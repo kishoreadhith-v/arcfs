@@ -7,7 +7,7 @@
 fusermount -u mnt 2>/dev/null || true
 rm -rf my_storage
 cargo build --release
-target/release/better-fs mount mnt &
+target/release/arcfs mount mnt &
 sleep 2
 
 # ============================================

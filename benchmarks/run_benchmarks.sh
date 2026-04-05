@@ -6,7 +6,7 @@ RESULTS_DIR="$(pwd)/benchmarks/results"
 FIO_JOBS_DIR="$(pwd)/benchmarks/fio_jobs"
 
 echo "========================================"
-echo " BetterFS Benchmark Suite Execution"
+echo " ArcFS Benchmark Suite Execution"
 echo "========================================"
 
 # 1. Safety & Environment Checks

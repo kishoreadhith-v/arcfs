@@ -8,19 +8,19 @@
 
 ```bash
 # Clean up any existing mounts
-pkill -9 better-fs 2>/dev/null || true
+pkill -9 arcfs 2>/dev/null || true
 fusermount -u mnt 2>/dev/null || true
 rm -rf my_storage
 mkdir -p mnt
 
 # Build and mount
 cargo build --release
-target/release/better-fs mount mnt
+target/release/arcfs mount mnt
 ```
 
 **DO NOT CLOSE THIS TERMINAL OR PRESS CTRL+C UNTIL DEMO IS DONE!**
 
-The terminal will show "Mounting BetterFS to mnt..." and stay running.
+The terminal will show "Mounting ArcFS to mnt..." and stay running.
 
 Now open a **NEW** terminal (Terminal 2) for the demo commands below.
 
@@ -29,7 +29,7 @@ Now open a **NEW** terminal (Terminal 2) for the demo commands below.
 ## Demo Commands (Terminal 2)
 
 ```bash
-cd ~/better-fs
+cd ~/arcfs
 
 # Wait for mount to be ready
 sleep 2

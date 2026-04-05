@@ -67,7 +67,7 @@ Transparency:     User never knows about tag internal mechanisms
 ### In FuseHandler (fuse_handler.rs)
 
 ```rust
-pub struct BetterFS {
+pub struct ArcFS {
     // ... existing fields ...
     
     // Phase 3: TagFS structures
@@ -107,14 +107,14 @@ pub struct FileTagSet {
 
 ### Phase A: Initialization
 
-**In BetterFS::new()**
+**In ArcFS::new()**
 ```rust
 pub fn new(manager: FileManager) -> Self {
     let registry = Arc::new(RwLock::new(HashMap::new()));
     let root = Arc::new(RwLock::new(Inode::new(FUSE_ROOT_ID, FileType::Directory)));
     registry.write().unwrap().insert(FUSE_ROOT_ID, root.clone());
 
-    BetterFS {
+    ArcFS {
         manager,
         inode_registry: registry,
         root,
@@ -613,7 +613,7 @@ fn test_tag_permutation_access() {
 ### Files Modified
 
 #### src/fuse_handler.rs
-- Add 4 new fields to `BetterFS` struct (virtual_dir_cache, inode_to_tags, tag_index, inode_tag_cache)
+- Add 4 new fields to `ArcFS` struct (virtual_dir_cache, inode_to_tags, tag_index, inode_tag_cache)
 - Add `next_vnode: AtomicU64` counter
 - Implement `hydrate_tree()` to rebuild indexes on startup
 - Modify `lookup()` with three-tier strategy (virtual dirs → tags → live tree)
@@ -764,7 +764,7 @@ Live Filesystem Tree
    - `get_next_level_tags()` - Navigation discovery
 
 4. **Initialization**
-   - `BetterFS::new()` - Create empty structures
+   - `ArcFS::new()` - Create empty structures
    - `hydrate_tree()` - Rebuild from sled on startup
 
 ---

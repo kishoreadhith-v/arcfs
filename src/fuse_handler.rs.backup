@@ -90,7 +90,7 @@ struct WriteBuffer {
     data: Vec<u8>,
 }
 
-pub struct BetterFS {
+pub struct ArcFS {
     pub manager: FileManager,
     // GLOBAL REGISTRY: Maps u64 -> The actual Inode struct
     // This allows FUSE to find any node (Live or Snapshot) by ID.
@@ -103,7 +103,7 @@ pub struct BetterFS {
     next_inode: AtomicU64,
 }
 
-impl BetterFS {
+impl ArcFS {
     pub fn new(manager: FileManager) -> Self {
         let registry = Arc::new(RwLock::new(HashMap::new()));
         
@@ -111,7 +111,7 @@ impl BetterFS {
         let root = Arc::new(RwLock::new(Inode::new(FUSE_ROOT_ID, FileType::Directory)));
         registry.write().unwrap().insert(FUSE_ROOT_ID, root.clone());
 
-        let mut fs = BetterFS {
+        let mut fs = ArcFS {
             manager,
             inode_registry: registry,
             root,
@@ -202,7 +202,7 @@ impl BetterFS {
     }
 }
 
-impl Filesystem for BetterFS {
+impl Filesystem for ArcFS {
     // 1. LOOKUP
     fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_str().unwrap();

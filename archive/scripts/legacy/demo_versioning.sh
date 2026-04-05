@@ -11,12 +11,12 @@ echo ""
 
 # Cleanup and mount
 echo "→ Step 1: Mounting filesystem"
-pkill -9 better-fs 2>/dev/null || true
+pkill -9 arcfs 2>/dev/null || true
 fusermount -u mnt 2>/dev/null || true
 rm -rf my_storage
 mkdir -p mnt
 cargo build --release > /dev/null 2>&1
-target/release/better-fs mount mnt > /tmp/arcfs.log 2>&1 &
+target/release/arcfs mount mnt > /tmp/arcfs.log 2>&1 &
 FS_PID=$!
 
 # Wait for mount
@@ -75,6 +75,6 @@ echo ""
 echo "✓ Demo complete! All 3 versions preserved independently."
 echo ""
 echo "→ Cleaning up..."
-pkill -9 better-fs
+pkill -9 arcfs
 fusermount -u mnt 2>/dev/null || true
 echo "✓ Done"

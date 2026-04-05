@@ -183,7 +183,7 @@ Snapshot Creation → save_snapshot() → Serialize to bincode → Store in sled
 
 ```bash
 $ cargo build
-   Compiling better-fs v0.1.0
+   Compiling arcfs v0.1.0
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.42s
 
 Warnings: 5 (all benign - unused imports/fields)

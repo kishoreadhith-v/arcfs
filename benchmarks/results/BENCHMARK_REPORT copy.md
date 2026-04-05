@@ -1,8 +1,8 @@
-# BetterFS (ArcFS) Comprehensive Benchmark Report
+# ArcFS (ArcFS) Comprehensive Benchmark Report
 
 ## 1. Executive Summary
 
-This report analyzes the performance of the BetterFS (ArcFS) user-space filesystem against three architectural baselines:
+This report analyzes the performance of the ArcFS (ArcFS) user-space filesystem against three architectural baselines:
 - **ext4**: The raw kernel-level filesystem standard. Represents the absolute speed limit of the physical storage layer.
 - **btrfs**: A kernel-level Copy-on-Write (CoW) filesystem. Our direct architectural competitor for snapshot/deduplication workloads.
 - **bindfs**: A pass-through FUSE filesystem. Measures the absolute "FUSE system call tax" (context switching overhead) without any complex storage logic.
@@ -78,7 +78,7 @@ Developing a user-space FUSE filesystem carries a heavy performance penalty: con
 4. **massive_stream (OOM Prevention):** Simulates a pipeline ingestion (e.g., video recording). We collect this to verify that the LRU eviction mechanism kicks in predictably and stops the system from OOMing under massive backpressure.
 5. **paranoid_db (ACID Compliance):** Simulates SQLite or PostgreSQL. Fsync disables all our memory caching tricks. We measure this to evaluate the raw transactional speed of the embedded `sled` KV database when mapping chunks synchronously.
 
-### What the Results Mean for BetterFS
+### What the Results Mean for ArcFS
 The data definitively proves that the recent overhaul of the `page_cache` to `Arc<RwLock<Vec<u8>>>` was a massive success. 
 
 1. **Write-Back Magic:** By coalescing writes in memory, you bypass the physical limits of random disk seeks entirely. 

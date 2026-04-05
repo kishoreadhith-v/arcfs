@@ -121,12 +121,12 @@ impl FileManager {
 
 ---
 
-## BetterFS Structure Changes (fuse_handler.rs)
+## ArcFS Structure Changes (fuse_handler.rs)
 
 ### Add These Fields
 
 ```rust
-pub struct BetterFS {
+pub struct ArcFS {
     // ... existing fields ...
     
     /// Virtual directory contexts: virtual_inode_id → (tags, children, etc.)
@@ -153,13 +153,13 @@ pub struct VirtualDirContext {
 }
 ```
 
-### Modify BetterFS::new()
+### Modify ArcFS::new()
 
 ```rust
 pub fn new(manager: FileManager) -> Self {
     // ... existing initialization ...
     
-    BetterFS {
+    ArcFS {
         manager,
         inode_registry: registry,
         root,
@@ -174,10 +174,10 @@ pub fn new(manager: FileManager) -> Self {
 }
 ```
 
-### Add to BetterFS Impl Block
+### Add to ArcFS Impl Block
 
 ```rust
-impl BetterFS {
+impl ArcFS {
     // ===========================
     // TAGFS Phase 3: Helpers
     // ===========================

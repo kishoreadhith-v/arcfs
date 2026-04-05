@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CONTEXT="local/e2e-fuse"
-LOG_FILE="/tmp/betterfs-local-e2e.out"
+LOG_FILE="/tmp/arcfs-local-e2e.out"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then

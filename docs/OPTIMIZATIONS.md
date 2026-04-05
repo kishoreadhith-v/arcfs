@@ -1,6 +1,6 @@
 # ArcFS Performance & Architectural Optimizations
 
-This document serves as a historical and architectural ledger of the performance optimizations made to ArcFS (formerly BetterFS). It details the evolution from initial naive implementations to production-grade, highly parallelized, and memory-efficient algorithms.
+This document serves as a historical and architectural ledger of the performance optimizations made to ArcFS (formerly ArcFS). It details the evolution from initial naive implementations to production-grade, highly parallelized, and memory-efficient algorithms.
 
 ## 1. FUSE Page Cache: O(1) In-Place Memory Mutations
 **The Bottleneck:** 

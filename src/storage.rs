@@ -11,7 +11,7 @@ pub struct Storage {
 impl Storage {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let root_dir = path.into();
-        // Ensure the storage directory exists (e.g., /tmp/betterfs_data)
+        // Ensure the storage directory exists (e.g., /tmp/arcfs_data)
         fs::create_dir_all(&root_dir).unwrap();
         Storage { root_dir }
     }

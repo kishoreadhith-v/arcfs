@@ -1,4 +1,4 @@
-name: BetterFS CI
+name: ArcFS CI
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## BetterFS CI Summary"
+            echo "## ArcFS CI Summary"
             echo "- Suite: cargo check"
             echo "- Status: ${{ steps.cargo_check.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"

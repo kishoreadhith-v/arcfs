@@ -1,4 +1,4 @@
-# Better-FS
+# ArcFS
 
 A FUSE-based filesystem implementing content-defined chunking and deduplication in Rust.
 
@@ -32,12 +32,12 @@ gantt
 
 ## Overview
 
-Better-FS demonstrates how modern backup and storage systems (like rsync, Dropbox, restic) achieve efficient deduplication through content-defined chunking. Files are split into variable-sized chunks using a rolling hash algorithm, enabling identical content blocks to be stored only once.
+ArcFS demonstrates how modern backup and storage systems (like rsync, Dropbox, restic) achieve efficient deduplication through content-defined chunking. Files are split into variable-sized chunks using a rolling hash algorithm, enabling identical content blocks to be stored only once.
 
 ## Project Structure
 
 ```
-better-fs/
+arcfs/
 ├── src/
 │   ├── main.rs          # FUSE filesystem implementation (mounts virtual filesystem)
 │   ├── chunker.rs       # Rolling hash chunker (content-defined boundaries)
@@ -50,7 +50,7 @@ better-fs/
 
 ### Component Breakdown
 
-- **main.rs** - Virtual filesystem mounted at `/tmp/betterfs` with a single in-memory file
+- **main.rs** - Virtual filesystem mounted at `/tmp/arcfs` with a single in-memory file
 - **chunker.rs** - Splits data into ~4KB variable chunks using polynomial rolling hash
 - **storage.rs** - Content-addressed storage (CAS) using SHA256 hashing
 - **file_manager.rs** - Orchestrates chunking + storage, produces file "recipes"
@@ -60,15 +60,15 @@ better-fs/
 
 ### Run the Filesystem
 ```bash
-# Build and run (mounts at /tmp/betterfs)
+# Build and run (mounts at /tmp/arcfs)
 cargo run
 
 # In another terminal:
-cat /tmp/betterfs/hello.txt
-ls -la /tmp/betterfs/
+cat /tmp/arcfs/hello.txt
+ls -la /tmp/arcfs/
 
 # Unmount when done
-fusermount -u /tmp/betterfs
+fusermount -u /tmp/arcfs
 ```
 
 ### Run Tests

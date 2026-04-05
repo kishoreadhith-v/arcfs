@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN="target/debug/better-fs"
+BIN="target/debug/arcfs"
 MOUNT_DIR="mnt"
 STORAGE_DIR="my_storage"
-LOG_FILE="/tmp/betterfs-verify-single-backing.log"
+LOG_FILE="/tmp/arcfs-verify-single-backing.log"
 FS_PID=""
 
 cleanup() {
@@ -30,7 +30,7 @@ if mountpoint -q "${MOUNT_DIR}"; then
   fusermount -u "${MOUNT_DIR}" >/dev/null 2>&1 || true
 fi
 
-echo "[3/7] Mounting BetterFS"
+echo "[3/7] Mounting ArcFS"
 "${BIN}" mount "${MOUNT_DIR}" >"${LOG_FILE}" 2>&1 &
 FS_PID=$!
 

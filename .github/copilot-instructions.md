@@ -1,11 +1,11 @@
-# BetterFS: Master Architectural Specification & RFC
+# ArcFS: Master Architectural Specification & RFC
 
 > **CRITICAL AGENT INSTRUCTION:**
 > NEVER use terminal utilities (e.g., `grep`, `cat`, `sed`, `awk`) to read, search, or edit files. YOU MUST strictly use the native API tools provided to you (e.g., `read_file`, `replace_string_in_file`, `create_file`, `grep_search`).
 
 ## 1. System Topology & Layering
-BetterFS is a user-space filesystem operating via FUSE. The architecture is strictly divided into four isolated layers. High-level layers may call low-level layers, but NEVER vice versa.
-1. **FUSE Interface Layer (`fuse_handler.rs`)**: Translates kernel VFS calls into BetterFS operations. Handles path-to-inode resolution and POSIX permission checks.
+ArcFS is a user-space filesystem operating via FUSE. The architecture is strictly divided into four isolated layers. High-level layers may call low-level layers, but NEVER vice versa.
+1. **FUSE Interface Layer (`fuse_handler.rs`)**: Translates kernel VFS calls into ArcFS operations. Handles path-to-inode resolution and POSIX permission checks.
 2. **Page Cache Layer (In-Memory)**: A write-back, LRU-evicted memory buffer. Absorbs 4KB random writes and coalesces them into sequential, chunk-aligned operations.
 3. **Metadata Engine (`file_manager.rs`)**: Manages the Directed Acyclic Graph (DAG) of the filesystem namespace using an embedded KV store (`sled`). Strictly ACID compliant.
 4. **CAS Storage Engine (`storage.rs`)**: The physical disk layer. Immutable, append-only, content-addressed blob storage.
@@ -100,7 +100,7 @@ Generate and execute these specific `.fio` configurations. Export results using 
     * *Goal:* Force a physical disk flush on every single write to prove the filesystem handles synchronous safety constraints without deadlocking.
 
 ### 4. Advanced Profiling & Degradation
-* **Resource Profiling (The FUSE Tax):** During the `massive_stream` and `realistic_mix` tests on ArcFS, monitor the daemon's CPU and RAM footprint using: `pidstat -r -u -p $(pgrep better-fs) 1`. Record the P99 RAM usage to prove the LRU cache holds steady.
+* **Resource Profiling (The FUSE Tax):** During the `massive_stream` and `realistic_mix` tests on ArcFS, monitor the daemon's CPU and RAM footprint using: `pidstat -r -u -p $(pgrep arcfs) 1`. Record the P99 RAM usage to prove the LRU cache holds steady.
 * **The Aged Filesystem Test:** Before running the final `realistic_mix`, fill the drive to 85% capacity with duplicated files, then randomly delete half of them. This fragments the Sled DB and CAS directory, proving lookup latency doesn't degrade logarithmically over time.
 
 ### 5. The Macro-Benchmark (Linux Kernel Extraction)

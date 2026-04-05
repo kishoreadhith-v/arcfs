@@ -1,4 +1,4 @@
-name: BetterFS E2E FUSE (Manual)
+name: ArcFS E2E FUSE (Manual)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## BetterFS Manual FUSE Summary"
+            echo "## ArcFS Manual FUSE Summary"
             echo "- Suite: regression_e2e"
             echo "- Status: ${{ steps.fuse_e2e.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
