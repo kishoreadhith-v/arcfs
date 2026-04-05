@@ -43,6 +43,12 @@ validate_depth_fairness() {
     local file=$2
 
     if [[ "$job" == "rand_write" || "$job" == "realistic_mix" || "$job" == "paranoid_db" ]]; then
+        local configured_depth
+        configured_depth=$(get_metric "$file" '.jobs[0]["job options"].iodepth')
+        if [[ "$configured_depth" == "1" ]]; then
+            return 0
+        fi
+
         local depth1
         depth1=$(get_metric "$file" '.jobs[0].iodepth_level["1"]')
         awk -v d="$depth1" 'BEGIN {
