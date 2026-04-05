@@ -24,10 +24,23 @@ fi
 mkdir -p "$RESULTS_DIR"
 echo "[+] Results will be saved to: $RESULTS_DIR"
 
-# Two-class suite
-CLASSES=("responsive" "durable")
+# Three-class suite (override with CLASS, e.g. CLASS=worst_case or CLASS=responsive,durable)
+ALL_CLASSES=("responsive" "durable" "worst_case")
+if [ -n "${CLASS:-}" ]; then
+    IFS=',' read -r -a CLASSES <<< "$CLASS"
+    for class in "${CLASSES[@]}"; do
+        if [[ ! " ${ALL_CLASSES[*]} " =~ " ${class} " ]]; then
+            echo "[!] ERROR: Unsupported CLASS='$class'. Allowed: ${ALL_CLASSES[*]}"
+            exit 1
+        fi
+    done
+else
+    CLASSES=("${ALL_CLASSES[@]}")
+fi
 JOBS=("seq_write" "rand_write" "realistic_mix" "massive_stream" "paranoid_db")
 MOUNTS=("ext4_mount" "btrfs_mount")
+
+echo "[+] Classes selected: ${CLASSES[*]}"
 
 # 2. Execute Matrix
 for class in "${CLASSES[@]}"; do

@@ -43,7 +43,7 @@ def parse_filename(file_path: str):
         return class_name, profile, filesystem
 
     # Pattern B: {profile}_{class}_{filesystem}_mount.json
-    m_b = re.match(r"^(.+)_(responsive|durable)_(ext4|bindfs|btrfs|arcfs)_mount\.json$", name)
+    m_b = re.match(r"^(.+)_(responsive|durable|worst_case)_(ext4|bindfs|btrfs|arcfs)_mount\.json$", name)
     if m_b:
         profile = m_b.group(1)
         class_name = m_b.group(2)

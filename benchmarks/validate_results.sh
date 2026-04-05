@@ -2,13 +2,25 @@
 set -e
 
 RESULTS_DIR="$(pwd)/benchmarks/results"
-CLASSES=("responsive" "durable")
+ALL_CLASSES=("responsive" "durable" "worst_case")
+if [ -n "${CLASS:-}" ]; then
+    IFS=',' read -r -a CLASSES <<< "$CLASS"
+    for class in "${CLASSES[@]}"; do
+        if [[ ! " ${ALL_CLASSES[*]} " =~ " ${class} " ]]; then
+            echo "[!] ERROR: Unsupported CLASS='$class'. Allowed: ${ALL_CLASSES[*]}"
+            exit 1
+        fi
+    done
+else
+    CLASSES=("${ALL_CLASSES[@]}")
+fi
 JOBS=("seq_write" "rand_write" "realistic_mix" "massive_stream" "paranoid_db")
 MOUNTS=("ext4_mount" "bindfs_mount" "btrfs_mount" "arcfs_mount")
 
 echo "========================================"
 echo "📝 Benchmark Results Validation Report"
 echo "========================================"
+echo "[+] Classes selected: ${CLASSES[*]}"
 
 if [ ! -d "$RESULTS_DIR" ]; then
     echo "[!] No results directory found."
@@ -78,4 +90,4 @@ done
 
 echo ""
 echo "========================================"
-echo "Data Validation Complete (2-class suite)!"
+echo "Data Validation Complete (3-class suite)!"

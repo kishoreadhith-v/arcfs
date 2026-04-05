@@ -9,7 +9,7 @@ RESULTS_DIR = "benchmarks/results"
 OUT_DIR = "benchmarks/charts"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-PERF_CLASSES = ["responsive", "durable"]
+PERF_CLASSES = ["responsive", "durable", "worst_case"]
 PERF_JOBS = ["seq_write", "rand_write", "realistic_mix", "massive_stream", "paranoid_db"]
 INTEGRITY_PROFILES = ["seq_verify", "rand4k_verify", "rand64k_verify", "fsync4k_verify"]
 MOUNTS = ["ext4_mount", "bindfs_mount", "btrfs_mount", "arcfs_mount"]
@@ -207,7 +207,9 @@ def chart_latency_ratio_vs_ext4(class_name: str, class_data: Dict[str, Dict[str,
 
 
 def chart_arcfs_vs_ext4(perf_data: Dict[str, Dict[str, Dict[str, Dict[str, float]]]]):
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    fig, axes = plt.subplots(1, len(PERF_CLASSES), figsize=(7 * len(PERF_CLASSES), 5))
+    if len(PERF_CLASSES) == 1:
+        axes = [axes]
     x = np.arange(len(PERF_JOBS))
     width = 0.35
 
