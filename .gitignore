@@ -4,3 +4,4 @@ target/
 test_db_*/
 my_storage/
 mnt/
+*.json

@@ -1137,6 +1137,11 @@ impl Filesystem for ArcFS {
         }
         drop(snaps);
 
+        // Check if ino is a TagFS virtual directory
+        if let Some(_context) = self.get_virtual_dir_tags(ino) {
+            return reply.attr(&TTL, &dir_attr(ino));
+        }
+
         let registry = self.inode_registry.read().unwrap();
         if let Some(node) = registry.get(&ino) {
             let guard = node.read().unwrap();

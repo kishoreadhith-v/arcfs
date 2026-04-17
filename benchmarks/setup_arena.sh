@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-ARENA_DIR="/home/kishore/benchmark_arena"
+ARENA_DIR="$HOME/benchmark_arena"
 
 echo "========================================"
 echo " Allocating Benchmark Arena Loopbacks"
@@ -34,10 +34,10 @@ else
     echo "[-] Ext4 already mounted."
 fi
 
-# Mount Btrfs
+# Mount Btrfs (with zstd compression to match ArcFS)
 if ! mountpoint -q "$ARENA_DIR/btrfs_mount"; then
-    sudo mount -o loop btrfs_disk.img btrfs_mount
-    echo "[+] Btrfs mounted."
+    sudo mount -o loop,compress=zstd:3 btrfs_disk.img btrfs_mount
+    echo "[+] Btrfs mounted (compress=zstd:3)."
 else
     echo "[-] Btrfs already mounted."
 fi
