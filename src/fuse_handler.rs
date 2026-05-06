@@ -11,7 +11,9 @@ use fuser::{
     ReplyEmpty,
     ReplyEntry,
     ReplyOpen,
+    ReplyStatfs,
     ReplyWrite,
+    ReplyXattr,
     Request,
 };
 use libc::{ EEXIST, EINVAL, EISDIR, ENOENT, EROFS };
@@ -1894,10 +1896,33 @@ impl Filesystem for ArcFS {
         }
     }
 
+    fn flush(&mut self, _req: &Request, ino: u64, _fh: u64, _lock_owner: u64, reply: ReplyEmpty) {
+        if self.is_tag_virtual_dir_inode(ino) {
+            return reply.ok();
+        }
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+        let _ = self.flush_inode_cache(target_ino);
+        reply.ok();
+    }
+
     fn rmdir(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEmpty) {
         let name_str = name.to_str().unwrap();
 
-        if parent == TAGS_DIR_ID || self.is_tag_virtual_dir_inode(parent) {
+        // TagFS: rmdir on a tag virtual dir removes the tag from all files
+        if parent == TAGS_DIR_ID {
+            let files = self.manager.get_files_with_tag(name_str).unwrap_or_default();
+            for file_id in &files {
+                let _ = self.manager.delete_file_tags(*file_id);
+            }
+            // Purge the virtual dir from cache
+            let tags = vec![name_str.to_string()];
+            let key = self.tag_key(&tags);
+            if let Some(vino) = self.tag_dir_ids_by_key.write().unwrap().remove(&key) {
+                self.tag_virtual_dirs.write().unwrap().remove(&vino);
+            }
+            return reply.ok();
+        }
+        if self.is_tag_virtual_dir_inode(parent) {
             return reply.error(EINVAL);
         }
 
@@ -1918,5 +1943,195 @@ impl Filesystem for ArcFS {
         }
 
         self.unlink(_req, parent, name, reply);
+    }
+
+    fn rename(
+        &mut self,
+        _req: &Request,
+        parent: u64,
+        name: &OsStr,
+        newparent: u64,
+        newname: &OsStr,
+        _flags: u32,
+        reply: ReplyEmpty,
+    ) {
+        let old_name = name.to_str().unwrap();
+        let new_name = newname.to_str().unwrap();
+
+        // Block renames inside snapshots
+        if parent == SNAPSHOT_DIR_ID || self.inode_in_snapshot(parent) {
+            return reply.error(EROFS);
+        }
+        if newparent == SNAPSHOT_DIR_ID || self.inode_in_snapshot(newparent) {
+            return reply.error(EROFS);
+        }
+
+        // Block renames of/into TagFS virtual directories
+        if parent == TAGS_DIR_ID || self.is_tag_virtual_dir_inode(parent) {
+            return reply.error(EINVAL);
+        }
+        if newparent == TAGS_DIR_ID || self.is_tag_virtual_dir_inode(newparent) {
+            return reply.error(EINVAL);
+        }
+
+        // [CoW] Ensure both parents are mutable before modification
+        if let Some(parent_path) = self.get_path_from_inode(parent) {
+            let _ = self.get_mutable_inode(&parent_path);
+        }
+        if parent != newparent {
+            if let Some(new_parent_path) = self.get_path_from_inode(newparent) {
+                let _ = self.get_mutable_inode(&new_parent_path);
+            }
+        }
+
+        // 1. Remove child from old parent's children map
+        let child_arc = {
+            let registry = self.inode_registry.read().unwrap();
+            let old_parent_arc = match registry.get(&parent) {
+                Some(node) => node.clone(),
+                None => return reply.error(ENOENT),
+            };
+            drop(registry);
+
+            let mut old_parent_guard = old_parent_arc.write().unwrap();
+            match old_parent_guard.children.remove(old_name) {
+                Some(child) => child,
+                None => return reply.error(ENOENT),
+            }
+        };
+
+        // 2. If target name already exists in new parent, remove it first (POSIX semantics)
+        {
+            let registry = self.inode_registry.read().unwrap();
+            if let Some(new_parent_arc) = registry.get(&newparent) {
+                let mut new_parent_guard = new_parent_arc.write().unwrap();
+                if let Some(existing) = new_parent_guard.children.remove(new_name) {
+                    let existing_ino = existing.read().unwrap().id;
+                    let _ = self.manager.delete_dirent(newparent, new_name);
+                    self.evict_inode_cache(existing_ino);
+                }
+            }
+        }
+
+        // 3. Update the child's metadata (name & parent_id)
+        {
+            let mut child_guard = child_arc.write().unwrap();
+            child_guard.name = new_name.to_string();
+            child_guard.parent_id = newparent;
+
+            // Persist updated inode metadata
+            if self.manager.save_inode(&child_guard).is_err() {
+                return reply.error(libc::EIO);
+            }
+        }
+
+        // 4. Insert child into new parent's children map
+        {
+            let registry = self.inode_registry.read().unwrap();
+            let new_parent_arc = match registry.get(&newparent) {
+                Some(node) => node.clone(),
+                None => return reply.error(ENOENT),
+            };
+            drop(registry);
+
+            let mut new_parent_guard = new_parent_arc.write().unwrap();
+            new_parent_guard.children.insert(new_name.to_string(), child_arc.clone());
+        }
+
+        // 5. Update persistent dirent entries
+        if self.manager.delete_dirent(parent, old_name).is_err() {
+            return reply.error(libc::EIO);
+        }
+        let child_ino = child_arc.read().unwrap().id;
+        if self.manager.save_dirent(newparent, new_name, child_ino).is_err() {
+            return reply.error(libc::EIO);
+        }
+
+        // 6. Update tags if the file had auto-tags based on directory ancestry
+        let file_tags = self.manager.get_file_tags(child_ino).unwrap_or_default();
+        if !file_tags.is_empty() {
+            let new_auto_tags = self.derive_tags_from_parent_ancestry(newparent);
+            let child_name = child_arc.read().unwrap().name.clone();
+            if !new_auto_tags.is_empty() && !child_name.is_empty() {
+                let _ = self.manager.set_file_tags(child_ino, &child_name, new_auto_tags);
+            }
+        }
+
+        reply.ok();
+    }
+
+    fn statfs(&mut self, _req: &Request, _ino: u64, reply: ReplyStatfs) {
+        // Report a reasonable filesystem size so GUIs display disk space
+        let block_size: u32 = 4096;
+        let total_blocks: u64 = 1024 * 1024; // ~4 GB virtual capacity
+        let free_blocks: u64 = total_blocks / 2;
+        let files: u64 = self.inode_registry.read().unwrap().len() as u64;
+        let free_files: u64 = u64::MAX - files;
+
+        reply.statfs(
+            total_blocks,  // blocks
+            free_blocks,   // bfree
+            free_blocks,   // bavail
+            files,         // files
+            free_files,    // ffree
+            block_size,    // bsize
+            255,           // namelen
+            block_size,    // frsize
+        );
+    }
+
+    fn access(&mut self, _req: &Request, ino: u64, _mask: i32, reply: ReplyEmpty) {
+        // Snapshot content is read-only
+        if self.inode_in_snapshot(ino) {
+            // Allow read/execute checks, deny write
+            if _mask & libc::W_OK != 0 {
+                return reply.error(EROFS);
+            }
+            return reply.ok();
+        }
+
+        // TagFS virtual dirs are read-only
+        if self.is_tag_virtual_dir_inode(ino) {
+            if _mask & libc::W_OK != 0 {
+                return reply.error(EROFS);
+            }
+            return reply.ok();
+        }
+
+        // For all other inodes, allow access if they exist
+        if ino == FUSE_ROOT_ID
+            || ino == TAGS_DIR_ID
+            || ino == TAGFS_CONTROL_ID
+            || ino == SNAPSHOT_DIR_ID
+            || ino == SNAPSHOT_CREATE_ID
+        {
+            return reply.ok();
+        }
+
+        // Check virtual files → resolve to real inode
+        let target_ino = self.real_inode_for_virtual_file(ino).unwrap_or(ino);
+
+        let registry = self.inode_registry.read().unwrap();
+        if registry.contains_key(&target_ino) {
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
+    }
+
+    fn getxattr(&mut self, _req: &Request, _ino: u64, _name: &OsStr, size: u32, reply: ReplyXattr) {
+        if size == 0 {
+            reply.size(0);
+        } else {
+            reply.data(&[]);
+        }
+    }
+
+    fn listxattr(&mut self, _req: &Request, _ino: u64, size: u32, reply: ReplyXattr) {
+        if size == 0 {
+            reply.size(0);
+        } else {
+            reply.data(&[]);
+        }
     }
 }
