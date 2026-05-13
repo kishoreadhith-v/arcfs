@@ -1,0 +1,165 @@
+\relax 
+\citation{restic2024}
+\citation{borgbackup2024}
+\citation{vangoor2017fuse}
+\citation{soules2003metadata}
+\citation{zhu2008dedup}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{}\protected@file@percent }
+\citation{sled2024}
+\citation{muthitacharoen2001lbfs}
+\citation{xia2016fastcdc}
+\citation{quinlan2002venti}
+\citation{gifford1991semantic}
+\citation{bloehdorn2006tagfs}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Background and Motivation}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-A}}Content-Defined Chunking}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-B}}Content-Addressable Storage}{2}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {II-C}}Write-Back Caching in User-Space Filesystems}{2}{}\protected@file@percent }
+\citation{muthitacharoen2001lbfs}
+\citation{zhu2008dedup}
+\citation{borgbackup2024}
+\citation{xia2016fastcdc}
+\citation{rosenblum1992lfs}
+\citation{jannen2015betrfs}
+\citation{sled2024}
+\citation{lu2017wisckey}
+\citation{weil2006ceph}
+\citation{vangoor2017fuse}
+\citation{miller2021bento}
+\@writefile{toc}{\contentsline {section}{\numberline {III}Related Work}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Semantic and Tag-Based Filesystems}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Content-Defined Chunking and Deduplication}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Copy-on-Write Filesystems}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-D}}Write-Optimized Data Structures and Storage Engines}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-E}}Distributed and Networked Filesystems}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-F}}User-Space Filesystem Performance}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-G}}Applicability to Cloud Storage Workloads}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {IV}System Architecture}{4}{}\protected@file@percent }
+\newlabel{sec:arch}{{IV}{4}{}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}FUSE Handler and Inode Registry}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Write-Back LRU Cache}{4}{}\protected@file@percent }
+\newlabel{sec:cache}{{\mbox  {IV-B}}{4}{}{subsection.4.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0a}Write path.}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0b}LRU maintenance.}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0c}Eviction.}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0d}Flush triggers.}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}FastCDC Chunking Engine}{5}{}\protected@file@percent }
+\newlabel{sec:cdc}{{\mbox  {IV-C}}{5}{}{subsection.4.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0a}Gear-hash table construction.}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0b}Rolling hash update and boundary detection.}{5}{}\protected@file@percent }
+\newlabel{eq:gear}{{1}{5}{}{equation.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0c}Intra-file boundary reset.}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0d}Cross-file isolation.}{5}{}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces CDC Boundary Detection in \texttt  {create\_recipe\_from\_data()}}}{5}{}\protected@file@percent }
+\newlabel{alg:cdc}{{1}{5}{}{algorithm.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Content-Addressable Storage}{5}{}\protected@file@percent }
+\newlabel{sec:cas}{{\mbox  {IV-D}}{5}{}{subsection.4.4}{}}
+\citation{sled2024}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Sled Database Key Namespace}}{6}{}\protected@file@percent }
+\newlabel{tab:schema}{{I}{6}{}{table.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-D}0a}Chunk reading.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-E}}Metadata Engine and Schema}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-F}}Garbage Collection}{6}{}\protected@file@percent }
+\newlabel{sec:gc}{{\mbox  {IV-F}}{6}{}{subsection.4.6}{}}
+\@writefile{loa}{\contentsline {algorithm}{\numberline {2}{\ignorespaces Offline Garbage Collection (\texttt  {run\_gc()})}}{6}{}\protected@file@percent }
+\newlabel{alg:gc}{{2}{6}{}{algorithm.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-F}0a}Phase 1: Mark.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-F}0b}Phase 2: Sweep.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-F}0c}GC and snapshot interaction.}{6}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-F}0d}GC safety.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-G}}Copy-on-Write Versioning Engine}{7}{}\protected@file@percent }
+\newlabel{sec:cow}{{\mbox  {IV-G}}{7}{}{subsection.4.7}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-G}0a}Snapshot creation.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-G}0b}CoW semantics on live writes.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-G}0c}Read-only enforcement.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-H}}TagFS Virtual Ontology Engine}{7}{}\protected@file@percent }
+\newlabel{sec:tagfs}{{\mbox  {IV-H}}{7}{}{subsection.4.8}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0a}Persistent state.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0b}In-memory indexes.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0c}Tag-intersection at \texttt  {readdir} time.}{7}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0d}Virtual inode allocation.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0e}Tag control interface.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-I}}Crash Recovery Analysis}{8}{}\protected@file@percent }
+\newlabel{sec:crash}{{\mbox  {IV-I}}{8}{}{subsection.4.9}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0a}Safe window: CAS write.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0b}Critical window: between CAS write and recipe commit.}{8}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Evaluation System Configuration}}{8}{}\protected@file@percent }
+\newlabel{tab:sysconfig}{{II}{8}{}{table.2}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0c}Metadata mutations.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0d}Snapshot creation crash.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {V}Experimental Evaluation}{8}{}\protected@file@percent }
+\newlabel{sec:eval}{{V}{8}{}{section.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-A}}Methodology}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {V-A}0a}System configuration.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {V-A}0b}Benchmark profiles.}{8}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces fio Benchmark Profile Parameters}}{9}{}\protected@file@percent }
+\newlabel{tab:fio}{{III}{9}{}{table.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {V-A}0c}Benchmark classes.}{9}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Responsive Class}{9}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces ArcFS write bandwidth relative to ext4 across the responsive (left) and durable (right) evaluation classes. ArcFS outperforms ext4 by up to $9.2\times $ in the responsive class; the gap narrows under durable fsync constraints, confirming that write-back buffering, not measurement artifact, explains the responsive advantage.}}{9}{}\protected@file@percent }
+\newlabel{fig:class_compare}{{1}{9}{}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Responsive class write bandwidth per benchmark profile across all four filesystem targets. ArcFS dominates all five profiles through write-back coalescing. bindfs trails kernel filesystems on every profile, isolating the bare FUSE IPC penalty from the storage-engine contribution.}}{9}{}\protected@file@percent }
+\newlabel{fig:responsive}{{2}{9}{}{figure.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Durable Class}{9}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Durable class write bandwidth per benchmark profile. ArcFS performance converges toward kernel baselines when every dirty buffer must flush through the FastCDC $\to $ SHA-256 $\to $ zstd $\to $ sled pipeline before the write call returns. ArcFS outperforms ext4 on the \texttt  {paranoid\_db} profile (per-4\,KB fsync), reflecting the sled engine's non-blocking commit path.}}{10}{}\protected@file@percent }
+\newlabel{fig:durable}{{3}{10}{}{figure.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Integrity suite summary. All targets returned exit code 0 (zero errors) across sequential, random 4\,KB, and random 64\,KB verification profiles. ArcFS shows higher wall-clock runtime on \texttt  {fsync4k\_verify} due to user-space flush cost per sync point, a structural property of the FUSE architecture.}}{10}{}\protected@file@percent }
+\newlabel{fig:integrity}{{4}{10}{}{figure.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-D}}Integrity Verification}{10}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Physical disk consumption versus copy count for a 100\,MB reference file. Ext4 and bindfs grow strictly linearly. Btrfs stays constant at $\sim $21\,MB via O(1) kernel reflink. ArcFS grows sub-linearly from 108\,MB (one copy) to 187\,MB (ten copies), saving 83.7\% of the 1,153\,MB logical total.}}{10}{}\protected@file@percent }
+\newlabel{fig:dedup}{{5}{10}{}{figure.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-E}}Deduplication Efficiency}{10}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-F}}Compression Efficiency}{10}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Physical-to-logical storage ratio versus data compressibility (0\% = pure random bytes; 100\% = uniform zeros). Ext4, bindfs, and uncompressed Btrfs hold a 1.0 ratio at all levels. ArcFS achieves 0.77 at 25\%, 0.51 at 50\%, and 0.396 at 75\% compressibility. Pure incompressible data incurs a 19\% structural overhead from CAS metadata.}}{11}{}\protected@file@percent }
+\newlabel{fig:compress}{{6}{11}{}{figure.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Cumulative physical disk usage across five successive snapshots with 10\% data churn per snapshot (200\,MB base). Ext4 and bindfs grow by $\sim $209\,MB per snapshot (full copy). Btrfs grows by $\sim $21\,MB (kernel CoW extent sharing). ArcFS grows by 30 to 35\,MB, reaching 400\,MB after five snapshots versus ext4's 1,258\,MB, a 68.2\% reduction.}}{11}{}\protected@file@percent }
+\newlabel{fig:snapshot}{{7}{11}{}{figure.7}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-G}}Snapshot Storage Cost}{11}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {8}{\ignorespaces Disk usage efficiency heatmap: physical-to-logical storage ratio (lower is better) across all four disk-usage profiles and all four filesystem targets. ArcFS achieves the lowest ratio on mixed (0.07) and compression (0.57 average) scenarios. Btrfs dominates on pure deduplication (0.016) via O(1) reflink.}}{11}{}\protected@file@percent }
+\newlabel{fig:heatmap}{{8}{11}{}{figure.8}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-H}}Mixed Realistic Workload}{11}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-I}}Cross-Profile Storage Summary}{11}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Discussion}{11}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-A}}Two-Class Performance Trade-off}{11}{}\protected@file@percent }
+\citation{muthitacharoen2001lbfs}
+\citation{borgbackup2024}
+\citation{jannen2015betrfs}
+\citation{miller2021bento}
+\citation{lu2017wisckey}
+\citation{weil2006ceph}
+\citation{quinlan2002venti}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-B}}Overhead Sources and Limits}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {VI-C}}Comparison with Prior Systems}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Limitations and Future Work}{12}{}\protected@file@percent }
+\newlabel{sec:limits}{{VII}{12}{}{section.7}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0a}L1 — Offline GC with unsafe concurrent-use window.}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0b}L2 — O(n) LRU update at bounded scale.}{12}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0c}L3 — Permanent storage growth from snapshot recipe leak.}{12}{}\protected@file@percent }
+\citation{weil2006ceph}
+\bibstyle{IEEEtran}
+\bibdata{references}
+\bibcite{restic2024}{1}
+\bibcite{borgbackup2024}{2}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0d}L4 — No on-read chunk integrity verification.}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0e}L5 — No encryption; hash-oracle side channel.}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0f}L6 — GC active-set memory is unbounded.}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0g}L7 — Single-threaded FUSE dispatch.}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0h}L8 — Single-node metadata and CAS.}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0i}L9 — Read path not benchmarked.}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{13}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{13}{}\protected@file@percent }
+\bibcite{vangoor2017fuse}{3}
+\bibcite{soules2003metadata}{4}
+\bibcite{zhu2008dedup}{5}
+\bibcite{sled2024}{6}
+\bibcite{muthitacharoen2001lbfs}{7}
+\bibcite{xia2016fastcdc}{8}
+\bibcite{quinlan2002venti}{9}
+\bibcite{gifford1991semantic}{10}
+\bibcite{bloehdorn2006tagfs}{11}
+\bibcite{rosenblum1992lfs}{12}
+\bibcite{jannen2015betrfs}{13}
+\bibcite{lu2017wisckey}{14}
+\bibcite{weil2006ceph}{15}
+\bibcite{miller2021bento}{16}
+\gdef \@abspage@last{14}
