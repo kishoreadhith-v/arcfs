@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.8.1)  6 MAY 2026 19:04
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.8.1)  13 MAY 2026 19:19
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -466,6 +466,26 @@ Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             See the microtype manual for details.
 
 
+LaTeX Font Info:    Trying to load font information for OML+pcr on input line 1
+19.
+(/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/omlpcr.fd
+File: omlpcr.fd 
+)
+LaTeX Font Info:    Font shape `OML/pcr/m/n' in size <10> not available
+(Font)              Font shape `OML/cmm/m/it' tried instead on input line 119.
+
+Underfull \hbox (badness 10000) in paragraph at lines 117--127
+[]\OT1/ptm/m/n/10 (+20) ArcFS ad-dresses all three chal-lenges within a
+ []
+
+
+Underfull \hbox (badness 7576) in paragraph at lines 117--127
+\OT1/ptm/m/n/10 (+20) sin-gle Rust pro-to-type. A write-back page cache|a
+ []
+
+
+Underfull \vbox (badness 1024) has occurred while \output is active []
+
 
 
 [1{/usr/local/texlive/2025/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{/usr/l
@@ -474,155 +494,161 @@ ocal/texlive/2025/texmf-dist/fonts/enc/dvips/base/8r.enc}
 
 ]
 
-LaTeX Font Info:    Trying to load font information for OML+pcr on input line 2
-04.
-(/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/omlpcr.fd
-File: omlpcr.fd 
-)
-LaTeX Font Info:    Font shape `OML/pcr/m/n' in size <10> not available
-(Font)              Font shape `OML/cmm/m/it' tried instead on input line 204.
 
-Underfull \hbox (badness 4752) in paragraph at lines 200--210
+Underfull \hbox (badness 4752) in paragraph at lines 202--212
 []\OT1/ptm/m/n/10 (+20) The sys-tem im-ple-ments the \OT1/pcr/m/n/10 fuser::Fil
 esystem
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 200--210
+Underfull \hbox (badness 10000) in paragraph at lines 202--212
 \OT1/pcr/m/n/10 Arc\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 RwLock\OML/cmm/m/it/10 <\O
 T1/pcr/m/n/10 Inode\OML/cmm/m/it/10 >>>>>\OT1/ptm/m/n/10 (+20) ) and a per-sis-
 tent
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 200--210
+Underfull \hbox (badness 10000) in paragraph at lines 202--212
 \OT1/ptm/m/n/10 (+20) Sled database. Real in-odes carry iden-ti-fiers be-low
  []
 
 
-Underfull \hbox (badness 3657) in paragraph at lines 200--210
+Underfull \hbox (badness 3657) in paragraph at lines 202--212
 \OT1/ptm/m/n/10 (+20) 1,000,000; vir-tual TagFS in-odes use iden-ti-fiers at or
 
  []
 
 
-Underfull \hbox (badness 1622) in paragraph at lines 225--235
+Underfull \hbox (badness 1622) in paragraph at lines 227--243
 []\OT1/ptm/m/n/10 (+20) The cache is the pri-mary mech-a-nism for mit-i-gat-ing
 
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 227--243
+\OT1/ptm/m/n/10 (+20) FUSE context-switch over-head. It is typed as
+ []
+
+
+Underfull \hbox (badness 8000) in paragraph at lines 227--243
+\OT1/pcr/m/n/10 HashMap\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 u64,(Vec\OML/cmm/m/it/
+10 <\OT1/pcr/m/n/10 u8\OML/cmm/m/it/10 >\OT1/pcr/m/n/10 ,bool)\OML/cmm/m/it/10 
+>\OT1/ptm/m/n/10 (+20) : the \OT1/pcr/m/n/10 u64 \OT1/ptm/m/n/10 (+20) key
  []
 
 
 
 [2]
 LaTeX Font Info:    Trying to load font information for OMS+pcr on input line 2
-63.
+71.
  (/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/omspcr.fd
 File: omspcr.fd 
 )
 LaTeX Font Info:    Font shape `OMS/pcr/m/n' in size <10> not available
-(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 263.
+(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 271.
 LaTeX Font Info:    Font shape `OML/pcr/m/n' in size <8> not available
-(Font)              Font shape `OML/cmm/m/it' tried instead on input line 289.
+(Font)              Font shape `OML/cmm/m/it' tried instead on input line 298.
 
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 370--376
+Underfull \hbox (badness 10000) in paragraph at lines 355--358
+\OT1/ptm/m/n/10 (+20) The com-mand for-mat is \OML/cmm/m/it/10 <\OT1/pcr/m/n/10
+ verb\OML/cmm/m/it/10 > <\OT1/pcr/m/n/10 rel-path\OML/cmm/m/it/10 >
+ []
+
+
+
+[3]
+Underfull \hbox (badness 10000) in paragraph at lines 390--396
 []\OT1/ptm/m/n/10 (+20) A sep-a-rate \OT1/ptm/b/n/10 (+20) In-tegrity \OT1/ptm/
 m/n/10 (+20) class uses de-ter-min-is-tic
  []
 
 
-Underfull \hbox (badness 3291) in paragraph at lines 370--376
+Underfull \hbox (badness 3291) in paragraph at lines 390--396
 \OT1/ptm/m/n/10 (+20) physical-to-logical stor-age ra-tios across four sce-nar-
 ios:
  []
 
 
-Underfull \hbox (badness 7685) in paragraph at lines 370--376
+Underfull \hbox (badness 7685) in paragraph at lines 390--396
 \OT1/ptm/m/n/10 (+20) duplicate-file scal-ing, com-pres-sion spec-trum, snap-sh
 ot
  []
 
-<figures/arcfs_vs_ext4_by_class.png, id=19, 1517.67pt x 361.35pt>
+<figures/arcfs_vs_ext4_by_class.png, id=24, 1517.67pt x 361.35pt>
 File: figures/arcfs_vs_ext4_by_class.png Graphic file (type png)
 <use figures/arcfs_vs_ext4_by_class.png>
 Package pdftex.def Info: figures/arcfs_vs_ext4_by_class.png  used on input line
- 381.
+ 401.
 (pdftex.def)             Requested size: 252.0pt x 59.9951pt.
-<figures/responsive_per_job_bars.png, id=21, 1300.86pt x 722.7pt>
+<figures/responsive_per_job_bars.png, id=26, 1300.86pt x 722.7pt>
 File: figures/responsive_per_job_bars.png Graphic file (type png)
 <use figures/responsive_per_job_bars.png>
 Package pdftex.def Info: figures/responsive_per_job_bars.png  used on input lin
-e 392.
+e 412.
 (pdftex.def)             Requested size: 252.0pt x 139.9941pt.
 
 
-[3]
 <figures/durable_per_job_bars.png, id=27, 1300.86pt x 722.7pt>
 File: figures/durable_per_job_bars.png Graphic file (type png)
 <use figures/durable_per_job_bars.png>
 Package pdftex.def Info: figures/durable_per_job_bars.png  used on input line 4
-27.
+47.
 (pdftex.def)             Requested size: 252.0pt x 139.9941pt.
 
-Underfull \hbox (badness 3428) in paragraph at lines 445--454
+Underfull \hbox (badness 3428) in paragraph at lines 465--474
 \OT1/ptm/m/n/10 (+20) (one \OT1/pcr/m/n/10 fsync \OT1/ptm/m/n/10 (+20) per 4KB 
 mod-i-fi-ca-tion), Ar-cFS achieved
  []
 
-
-
 <figures/integrity_summary.png, id=28, 1228.59pt x 361.35pt>
 File: figures/integrity_summary.png Graphic file (type png)
 <use figures/integrity_summary.png>
-Package pdftex.def Info: figures/integrity_summary.png  used on input line 459.
+Package pdftex.def Info: figures/integrity_summary.png  used on input line 479.
 
 (pdftex.def)             Requested size: 252.0pt x 74.11581pt.
 
-Underfull \hbox (badness 10000) in paragraph at lines 478--483
+
+[4 <./figures/arcfs_vs_ext4_by_class.png> <./figures/responsive_per_job_bars.pn
+g> <./figures/durable_per_job_bars.png>]
+Underfull \hbox (badness 10000) in paragraph at lines 498--503
 []\OT1/ptm/m/n/10 (+20) ArcFS ex-hibits higher wall-clock run-time on
  []
 
-
-
-[4 <./figures/arcfs_vs_ext4_by_class.png> <./figures/responsive_per_job_bars.pn
-g> <./figures/durable_per_job_bars.png> <./figures/integrity_summary.png>]
-<figures/dedup_curve.png, id=38, 722.7pt x 433.62pt>
+<figures/dedup_curve.png, id=37, 722.7pt x 433.62pt>
 File: figures/dedup_curve.png Graphic file (type png)
 <use figures/dedup_curve.png>
-Package pdftex.def Info: figures/dedup_curve.png  used on input line 488.
+Package pdftex.def Info: figures/dedup_curve.png  used on input line 508.
 (pdftex.def)             Requested size: 252.0pt x 151.20026pt.
-<figures/compression_efficiency.png, id=39, 867.24pt x 433.62pt>
+
+
+<figures/compression_efficiency.png, id=38, 867.24pt x 433.62pt>
 File: figures/compression_efficiency.png Graphic file (type png)
 <use figures/compression_efficiency.png>
 Package pdftex.def Info: figures/compression_efficiency.png  used on input line
- 513.
+ 533.
 (pdftex.def)             Requested size: 252.0pt x 125.998pt.
-
-
-<figures/snapshot_growth.png, id=40, 722.7pt x 433.62pt>
+<figures/snapshot_growth.png, id=39, 722.7pt x 433.62pt>
 File: figures/snapshot_growth.png Graphic file (type png)
 <use figures/snapshot_growth.png>
-Package pdftex.def Info: figures/snapshot_growth.png  used on input line 544.
+Package pdftex.def Info: figures/snapshot_growth.png  used on input line 564.
 (pdftex.def)             Requested size: 252.0pt x 151.20026pt.
 
 
-[5 <./figures/dedup_curve.png> <./figures/compression_efficiency.png> <./figure
-s/snapshot_growth.png>]
-<figures/summary_heatmap.png, id=47, 1204.5pt x 618.05907pt>
+[5 <./figures/integrity_summary.png> <./figures/dedup_curve.png> <./figures/com
+pression_efficiency.png>]
+<figures/summary_heatmap.png, id=46, 1204.5pt x 618.05907pt>
 File: figures/summary_heatmap.png Graphic file (type png)
 <use figures/summary_heatmap.png>
-Package pdftex.def Info: figures/summary_heatmap.png  used on input line 586.
+Package pdftex.def Info: figures/summary_heatmap.png  used on input line 606.
 (pdftex.def)             Requested size: 252.0pt x 129.30583pt.
 
 
-(./paper.bbl
 
 
-Package balance Warning: You have called \balance in second column
-(balance)                Columns might not be balanced.
-
-[6 <./figures/summary_heatmap.png>])
+[6 <./figures/snapshot_growth.png> <./figures/summary_heatmap.png>]
+(./paper.bbl)
 
 ** Conference Paper **
 Before submitting the final camera ready copy, remember to:
@@ -638,6 +664,10 @@ Before submitting the final camera ready copy, remember to:
 
 
 
+
+Overfull \vbox (0.95284pt too high) has occurred while \output is active []
+
+
 [7] (./paper.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
@@ -645,13 +675,13 @@ L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 8697 strings out of 473190
- 136217 string characters out of 5715801
- 581720 words of memory out of 5000000
- 31526 multiletter control sequences out of 15000+600000
+ 8959 strings out of 473190
+ 138240 string characters out of 5715801
+ 613029 words of memory out of 5000000
+ 31788 multiletter control sequences out of 15000+600000
  613579 words of font info for 316 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 57i,8n,65p,1002b,329s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 57i,8n,65p,1002b,1039s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb
 ></usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb><
 /usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi8.pfb></u
@@ -666,7 +696,7 @@ live/2025/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/202
 st/fonts/type1/urw/times/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/
 type1/urw/times/utmr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/
 times/utmri8a.pfb>
-Output written on paper.pdf (7 pages, 1002336 bytes).
+Output written on paper.pdf (7 pages, 1003959 bytes).
 PDF statistics:
  116 PDF objects out of 1000 (max. 8388607)
  62 compressed objects within 1 object stream

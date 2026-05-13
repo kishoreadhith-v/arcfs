@@ -96,7 +96,7 @@ but lacks cross-file content deduplication without an offline pass through a
 tool such as \texttt{duperemove}. Neither system supports semantic organization
 beyond the directory tree.
 
-Application-level deduplicators such as Restic and rsync perform
+Application-level deduplicators such as Restic perform
 content-defined chunking effectively, yet their benefits do not extend to
 the filesystem layer: the underlying storage still writes every byte verbatim.
 Building these optimizations into the filesystem removes the coordination
@@ -115,7 +115,9 @@ grow unboundedly with dataset size unless the design imposes an explicit
 eviction policy~\cite{zhu2008dedup}.
 
 ArcFS addresses all three challenges within a single Rust prototype.
-A 1{,}024-frame VecDeque write-back LRU cache coalesces small
+A write-back page cache—a
+\texttt{HashMap\textless{}u64,\;(Vec\textless{}u8\textgreater{},\;bool)\textgreater{}}
+bounded at 1{,}024 entries by an LRU eviction policy—coalesces small
 writes before committing them to the CAS pipeline, reducing
 the per-write FUSE round-trip count. The sled embedded database provides
 ACID metadata with prefixed key namespaces that encode inode-to-recipe
@@ -125,8 +127,8 @@ upper bound on the in-memory footprint regardless of dataset size.
 
 The contributions of this paper are as follows:
 \begin{enumerate}
-\item A five-layer storage pipeline, FUSE interface, write-back cache,
-  FastCDC chunking, SHA-256 CAS, and Sled metadata engine, in which
+\item A five-layer storage pipeline—FUSE interface, write-back cache,
+  FastCDC chunking, SHA-256 CAS, and Sled metadata engine—in which
   each layer is independently testable.
 \item A TagFS virtual ontology engine that resolves composite tag paths
   via set-intersection over dual in-memory maps backed by a persistent
@@ -192,8 +194,8 @@ ArcFS couples five cooperating subsystems: the FUSE handler, the write-back
 LRU cache, the FastCDC chunking engine, the SHA-256 CAS storage layer, and
 the Sled metadata engine. Two additional planes, the CoW versioning engine
 and the TagFS virtual ontology, operate on metadata without touching CAS
-data. Figure~\ref{fig:class_compare} (right panel) illustrates how these
-layers interact during a write and a durable-class flush cycle.
+data. The subsections below describe each layer in detail; benchmark
+evidence appears in Section~\ref{sec:eval}.
 
 \subsection{FUSE Handler and Inode Registry}
 
@@ -223,15 +225,21 @@ creation and tag mutations acquire locks in this order.
 \subsection{Write-Back LRU Cache}
 
 The cache is the primary mechanism for mitigating FUSE context-switch
-overhead. A FUSE write call updates an in-memory \texttt{Vec\textless{}u8\textgreater{}}
-buffer and marks the inode \texttt{is\_dirty~=~true} before returning
-success to the kernel; no disk I/O occurs. The physical pipeline
+overhead. It is typed as
+\texttt{HashMap\textless{}u64,\;(Vec\textless{}u8\textgreater{},\;bool)\textgreater{}}:
+the \texttt{u64} key is the inode identifier, the \texttt{Vec\textless{}u8\textgreater{}}
+value accumulates the full write buffer for that inode, and the
+\texttt{bool} flag records whether the entry is dirty (i.e., unflushed
+to the CAS layer). A FUSE write call inserts or updates the target
+inode's entry, appends incoming bytes to its buffer, and sets the dirty
+flag to \texttt{true} before returning success to the kernel; no disk
+I/O occurs on the acceptance path. The physical pipeline
 (FastCDC $\to$ SHA-256 $\to$ zstd $\to$ CAS) activates at one of three
-points: the VecDeque reaches its 1{,}024-frame capacity and evicts the
-least-recently-used entry, the application calls \texttt{fsync(2)}, or the
-kernel calls \texttt{release} on file close. This deferred-coherence model
-shifts the throughput ceiling from physical media allocation to FUSE IPC
-bandwidth.
+points: the cache reaches its 1{,}024-entry LRU capacity and evicts the
+least-recently-used inode's entry, the application calls \texttt{fsync(2)},
+or the kernel calls \texttt{release} on file close. This deferred-coherence
+model shifts the throughput ceiling from physical media allocation to FUSE
+IPC bandwidth.
 
 Eviction of a dirty entry flushes the buffer through the full pipeline
 before removal. Clean entries are silently discarded, providing a
@@ -266,8 +274,9 @@ bytes. Hashing before compression preserves the property that content
 identity is independent of the compression codec or its version. If the
 path already exists, the write is skipped; deduplication is therefore
 implicit and requires no separate scan. The CAS store grows monotonically
-until a garbage collection pass removes chunks whose reference count reaches
-zero.
+until a garbage collection pass scans all live \texttt{ino\_recipe} entries
+to compute a reachable chunk set and removes any CAS blob not referenced
+by at least one recipe or snapshot.
 
 \subsection{Metadata Engine and Schema}
 
@@ -287,7 +296,7 @@ data. Table~\ref{tab:schema} shows the key namespace.
 \textbf{Key Pattern} & \textbf{Value} \\
 \midrule
 \texttt{ino\_meta:\textless{}id\textgreater{}} & \texttt{InodeMetadata} (bincode) \\
-\texttt{ino\_recipe:\textless{}id\textgreater{}} & Ordered chunk hash list + size \\
+\texttt{ino\_recipe:\textless{}id\textgreater{}} & Ordered chunk hash list + file size \\
 \texttt{dirent:\textless{}parent\textgreater{}:\textless{}name\textgreater{}} & Child inode ID (\texttt{u64}) \\
 \texttt{ino\_tags:\textless{}id\textgreater{}} & Per-inode tag set \\
 \texttt{tag\_index:\textless{}tag\textgreater{}} & \texttt{HashSet\textless{}u64\textgreater{}} of inode IDs \\
@@ -309,8 +318,9 @@ live namespace allocate new chunk hashes and overwrite the live recipe; the
 snapshot recipe pointer continues to reference the prior chunk set. Isolation
 follows copy-on-write semantics: once a snapshot exists, any inode touched
 by a live write allocates a new recipe entry while the snapshot retains the
-old one. Reference counts track shared and new chunks, preventing GC from
-reclaiming data reachable by any extant snapshot.
+old one. Because GC derives reachability by scanning all live and snapshot
+recipes, a chunk shared between the live tree and a snapshot is never
+reclaimed until both references are removed.
 
 \subsection{TagFS Virtual Ontology Engine}
 
@@ -333,12 +343,22 @@ same Sled transaction as the corresponding inode metadata update, so a tag
 mapping never outlives its physical file.
 
 A writable sentinel file, \texttt{.tags/.tagfs\_control}, accepts
-line-oriented commands of the form \texttt{set \textless{}path\textgreater{}
-\textless{}tags...\textgreater{}} and \texttt{del \textless{}path\textgreater{}}
-without requiring an unmount cycle.
+line-oriented commands without requiring an unmount cycle:
+\begin{lstlisting}
+# tag a file while the filesystem is live
+echo "set docs/report.txt work 2026" \
+     > mnt/.tags/.tagfs_control
+# remove all tags for a path
+echo "del docs/report.txt" \
+     > mnt/.tags/.tagfs_control
+\end{lstlisting}
+The command format is \texttt{\textless{}verb\textgreater{} \textless{}rel-path\textgreater{} [tags\ldots]};
+\texttt{set} atomically replaces the tag list, and \texttt{del} removes
+all tags for the given path.
 
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Experimental Evaluation}
+\label{sec:eval}
 
 \subsection{Methodology}
 
@@ -412,8 +432,8 @@ ArcFS coalesces those operations in RAM and defers the expensive FastCDC
 scan and CAS lookup to the next eviction event.
 
 The sustained-stream profile (\texttt{massive\_stream}) subjected the cache
-to 4\,GB of incompressible data. The 1{,}024-frame VecDeque absorbed
-incoming pages without triggering an out-of-memory event, sustaining
+to 4\,GB of incompressible data. The 1{,}024-entry LRU cache absorbed
+incoming writes without triggering an out-of-memory event, sustaining
 665.5\,MB/s and over 170{,}000\,IOPS. The bimodal (\texttt{realistic\_mix})
 and database-emulation (\texttt{paranoid\_db}) profiles confirmed that
 dynamic chunking and asynchronous eviction operate concurrently without
