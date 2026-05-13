@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.8.1)  13 MAY 2026 21:25
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2025) (preloaded format=pdflatex 2025.8.1)  13 MAY 2026 22:00
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -553,49 +553,46 @@ Underfull \hbox (badness 2205) in paragraph at lines 441--443
  []
 
 
-Overfull \hbox (87.05933pt too wide) in paragraph at lines 469--476
-[]\OT1/ptm/b/n/10 (-20) Data map\OT1/ptm/m/n/10 (-20) : \OT1/pcr/m/n/10 Arc\OML
-/cmm/m/it/10 <\OT1/pcr/m/n/10 RwLock\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 HashMap\O
-ML/cmm/m/it/10 <\OT1/pcr/m/n/10 u64,(Vec\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 u8\OM
-L/cmm/m/it/10 >\OT1/pcr/m/n/10 ,bool)\OML/cmm/m/it/10 >>>>\OT1/ptm/m/n/10 (-20)
- ,
+Underfull \hbox (badness 10000) in paragraph at lines 478--483
+ \OT1/ptm/m/it/10 (+20) b) LRU or-der.: [][] \OT1/ptm/m/n/10 (+20) An \OT1/pcr/
+m/n/10 Arc\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 RwLock\OML/cmm/m/it/10 <
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 483--484
+Underfull \hbox (badness 10000) in paragraph at lines 484--485
 []\OT1/ptm/m/n/10 (+20) The cache ca-pac-ity is 1,024 en-tries (con-stant
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 486--494
- \OT1/ptm/m/it/10 (+20) a) Write path.: [][] \OT1/ptm/m/n/10 (+20) A FUSE \OT1/
-pcr/m/n/10 write
+Underfull \hbox (badness 10000) in paragraph at lines 487--495
+ \OT1/ptm/m/it/10 (+20) c) Write path.: [][] \OT1/ptm/m/n/10 (+20) A FUSE \OT1/
+pcr/m/n/10 write \OT1/ptm/m/n/10 (+20) call
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 486--494
-\OT1/ptm/m/n/10 (+20) call lo-cates the tar-get in-ode's en-try us-ing
+Underfull \hbox (badness 10000) in paragraph at lines 487--495
+\OT1/ptm/m/n/10 (+20) lo-cates the tar-get in-ode's en-try us-ing
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 486--494
+Underfull \hbox (badness 10000) in paragraph at lines 487--495
 \OT1/pcr/m/n/10 HashMap::entry().or_insert_with()\OT1/ptm/m/n/10 (+20) , which
  []
 
 
-Underfull \hbox (badness 1389) in paragraph at lines 496--504
- \OT1/ptm/m/it/10 (+20) b) LRU main-te-nance.: [][] \OT1/ptm/m/n/10 (+20) Ev-er
+Underfull \hbox (badness 1389) in paragraph at lines 497--505
+ \OT1/ptm/m/it/10 (+20) d) LRU main-te-nance.: [][] \OT1/ptm/m/n/10 (+20) Ev-er
 y cache ac-cess in-vokes
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 496--504
+Underfull \hbox (badness 10000) in paragraph at lines 497--505
 \OT1/pcr/m/n/10 touch_cache_entry(ino)\OT1/ptm/m/n/10 (+20) , which ac-quires t
 he
  []
 
 
-Underfull \hbox (badness 4341) in paragraph at lines 496--504
+Underfull \hbox (badness 4341) in paragraph at lines 497--505
 \OT1/pcr/m/n/10 VecDeque \OT1/ptm/m/n/10 (+20) write lock, scans the deque lin-
 early for
  []
@@ -603,110 +600,108 @@ early for
 
 
 [4]
-Underfull \hbox (badness 10000) in paragraph at lines 512--517
+Underfull \hbox (badness 10000) in paragraph at lines 513--518
 []\OT1/ptm/m/n/10 (+20) If the en-try is dirty (flag = \OT1/pcr/m/n/10 true\OT1
 /ptm/m/n/10 (+20) ), call
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 512--517
+Underfull \hbox (badness 10000) in paragraph at lines 513--518
 \OT1/pcr/m/n/10 flush_inode_cache(ino)\OT1/ptm/m/n/10 (+20) : read the buffer
  []
 
 
-Underfull \hbox (badness 1661) in paragraph at lines 523--531
- \OT1/ptm/m/it/10 (+20) d) Flush trig-gers.: [][] \OT1/ptm/m/n/10 (+20) The pip
-eline ac-ti-vates at three
+Underfull \hbox (badness 1748) in paragraph at lines 524--532
+\OT1/pcr/m/n/10 fsync(2)\OT1/ptm/m/n/10 (+20) , rout-ing through the \OT1/pcr/m
+/n/10 fsync() \OT1/ptm/m/n/10 (+20) FUSE han-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 536--540
+Underfull \hbox (badness 1377) in paragraph at lines 524--532
+\OT1/ptm/m/n/10 (+20) in-ode; (ii) the ker-nel calls \OT1/pcr/m/n/10 release \O
+T1/ptm/m/n/10 (+20) on the last file-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 537--541
  \OT1/ptm/m/it/10 (+20) a) Gear-hash ta-ble con-struc-tion.: [][] \OT1/ptm/m/n/
 10 (+20) The 256-entry
  []
 
 
-Underfull \hbox (badness 6893) in paragraph at lines 536--540
+Underfull \hbox (badness 6893) in paragraph at lines 537--541
 \OT1/pcr/m/n/10 GEAR_MATRIX \OT1/ptm/m/n/10 (+20) is a compile-time con-stant b
 uilt by
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 536--540
+Underfull \hbox (badness 10000) in paragraph at lines 537--541
 \OT1/pcr/m/n/10 build_gear_matrix()\OT1/ptm/m/n/10 (+20) , a \OT1/pcr/m/n/10 co
 nst fn \OT1/ptm/m/n/10 (+20) that chains
  []
 
 
-Overfull \hbox (60.86581pt too wide) detected at line 545
-[]\OT1/cmr/m/n/10 [\OML/cmm/m/it/10 i\OT1/cmr/m/n/10 ]  \OMS/cmsy/m/n/10    [] 
- []
- []
 
 
-
-
-Underfull \hbox (badness 2027) in paragraph at lines 579--590
+Underfull \hbox (badness 2027) in paragraph at lines 581--592
  \OT1/ptm/m/it/10 (+20) d) Cross-file iso-la-tion.: [][] \OT1/ptm/m/n/10 (+20) 
 Ar-cFS guar-an-tees that the
  []
 
 
-Underfull \hbox (badness 6016) in paragraph at lines 579--590
+Underfull \hbox (badness 6016) in paragraph at lines 581--592
 \OT1/ptm/m/n/10 (+20) rolling hash state of one file never in-flu-ences the
  []
 
 
-Underfull \hbox (badness 4108) in paragraph at lines 579--590
+Underfull \hbox (badness 4108) in paragraph at lines 581--592
 \OT1/ptm/m/n/10 (+20) chunk bound-aries of a sub-se-quent file. This guar-an-
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 592--592
+Underfull \hbox (badness 10000) in paragraph at lines 594--594
 []\OT1/ptm/b/n/10 (+20) Algorithm 1 \OT1/ptm/m/n/10 (+20) CDC Bound-ary De-tec-
-tion in
+tion
  []
 
-LaTeX Font Info:    Font shape `OMS/ptm/m/n' in size <10> not available
-(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 609.
 
-Underfull \hbox (badness 10000) in paragraph at lines 622--625
+Underfull \hbox (badness 10000) in paragraph at lines 625--628
 []\OT1/ptm/m/n/10 (+20) After chunk-ing, each chunk is pro-cessed by
  []
 
 
-Underfull \hbox (badness 5133) in paragraph at lines 622--625
+Underfull \hbox (badness 5133) in paragraph at lines 625--628
 \OT1/pcr/m/n/10 write_chunk()\OT1/ptm/m/n/10 (+20) . The SHA-256 di-gest is com
 -puted
  []
 
 
-Underfull \hbox (badness 3250) in paragraph at lines 622--625
+Underfull \hbox (badness 3250) in paragraph at lines 625--628
 \OT1/ptm/m/n/10 (+20) over the \OT1/ptm/m/it/10 (+20) un-com-pressed \OT1/ptm/m
 /n/10 (+20) bytes be-fore any com-pres-sion
  []
 
 LaTeX Font Info:    Trying to load font information for OMS+pcr on input line 6
-34.
+37.
 (/usr/local/texlive/2025/texmf-dist/tex/latex/psnfss/omspcr.fd
 File: omspcr.fd 
 )
 LaTeX Font Info:    Font shape `OMS/pcr/m/n' in size <10> not available
-(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 634.
+(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 637.
 
-Underfull \hbox (badness 10000) in paragraph at lines 633--639
+Underfull \hbox (badness 10000) in paragraph at lines 636--642
 []\OT1/ptm/m/n/10 (+20) The chunk is stored at path
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 633--639
+Underfull \hbox (badness 10000) in paragraph at lines 636--642
 \OT1/pcr/m/n/10 cas/\OMS/cmsy/m/n/10 f\OT1/pcr/m/n/10 hash[0:2]\OMS/cmsy/m/n/10
  g\OT1/pcr/m/n/10 /\OMS/cmsy/m/n/10 f\OT1/pcr/m/n/10 hash[2:]\OMS/cmsy/m/n/10 g
  \OT1/ptm/m/n/10 (+20) un-der the stor-age
  []
 
 
-Underfull \hbox (badness 2591) in paragraph at lines 633--639
+Underfull \hbox (badness 2591) in paragraph at lines 636--642
 \OT1/ptm/m/n/10 (+20) hex-adec-i-mal char-ac-ters as a sub-di-rec-tory name---l
 imits
  []
@@ -715,39 +710,24 @@ imits
 
 [5]
 LaTeX Font Info:    Font shape `OML/pcr/m/n' in size <8> not available
-(Font)              Font shape `OML/cmm/m/it' tried instead on input line 678.
-
-Overfull \hbox (11.00339pt too wide) in paragraph at lines 674--692
- [][] 
- []
+(Font)              Font shape `OML/cmm/m/it' tried instead on input line 682.
 
 
+LaTeX Font Info:    Font shape `OMS/ptm/m/n' in size <9> not available
+(Font)              Font shape `OMS/cmsy/m/n' tried instead on input line 727.
 
-
-Underfull \hbox (badness 10000) in paragraph at lines 724--724
-[] []\OT1/ptm/b/n/10 (+20) for all $\OT1/cmr/m/n/10 ([]\OML/cmm/m/it/10 ;  []\O
-T1/cmr/m/n/10 )$ \OT1/ptm/m/n/10 (+20) in
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 730--732
-[] []$[] \OMS/cmsy/m/n/10   []\OML/cmm/m/it/10 :[]\OT1/cmr/m/n/10 ()$ \OMS/cmsy
-/m/n/10 f\OT1/ptm/m/n/10 (+20) walks
- []
-
-
-Underfull \hbox (badness 2359) in paragraph at lines 755--763
+Underfull \hbox (badness 2359) in paragraph at lines 758--766
 \OT1/ptm/m/n/10 (+20) the CAS di-rec-tory tree by call-ing \OT1/pcr/m/n/10 fs::
 read_dir()
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 755--763
+Underfull \hbox (badness 10000) in paragraph at lines 758--766
 \OT1/ptm/m/n/10 (+20) on the two-level sharded di-rec-tory struc-ture
  []
 
 
-Underfull \hbox (badness 2495) in paragraph at lines 755--763
+Underfull \hbox (badness 2495) in paragraph at lines 758--766
 \OT1/ptm/m/n/10 (+20) the par-ent two-character sub-di-rec-tory is then re-move
 d
  []
@@ -755,115 +735,103 @@ d
 
 
 [6]
-Overfull \hbox (33.96622pt too wide) in paragraph at lines 806--813
-[]\OT1/ptm/m/n/10 (-20) Call \OT1/pcr/m/n/10 clone_subtree_from_metadata(FUSE_R
-OOT_ID,
+Underfull \hbox (badness 10000) in paragraph at lines 809--816
+[]\OT1/ptm/m/n/10 (+20) Call \OT1/pcr/m/n/10 clone_subtree_from_metadata(
  []
 
 
+Underfull \hbox (badness 10000) in paragraph at lines 809--816
+\OT1/pcr/m/n/10 FUSE_ROOT_ID,...)\OT1/ptm/m/n/10 (+20) , which re-cur-sively de
+ep-
+ []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 842--847
+Underfull \hbox (badness 10000) in paragraph at lines 845--850
 \OT1/ptm/m/n/10 (+20) replies. The \OT1/pcr/m/n/10 write()\OT1/ptm/m/n/10 (+20)
  , \OT1/pcr/m/n/10 create()\OT1/ptm/m/n/10 (+20) , \OT1/pcr/m/n/10 mkdir()\OT1/
 ptm/m/n/10 (+20) , and
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 871--884
  \OT1/ptm/m/it/10 (+20) b) In-memory in-dexes.: [][] \OT1/ptm/m/n/10 (+20) At m
 ount time,
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
+Underfull \hbox (badness 10000) in paragraph at lines 871--884
 \OT1/pcr/m/n/10 hydrate_tree() \OT1/ptm/m/n/10 (+20) pop-u-lates both per-sis-t
 ent
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
-\OT1/ptm/m/n/10 (+20) in-dexes into mem-ory. The for-ward in-memory
+Underfull \hbox (badness 4805) in paragraph at lines 871--884
+\OT1/ptm/m/n/10 (+20) in-dexes into mem-ory. The for-ward in-memory in-dex
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
-\OT1/ptm/m/n/10 (+20) in-dex is rep-re-sented as \OT1/pcr/m/n/10 tag_virtual_di
-rs:
+Underfull \hbox (badness 10000) in paragraph at lines 871--884
+\OT1/ptm/m/n/10 (+20) (\OT1/pcr/m/n/10 tag_virtual_dirs\OT1/ptm/m/n/10 (+20) ) 
+is typed as \OT1/pcr/m/n/10 Arc\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 RwLock\OML/cmm
+/m/it/10 <
  []
 
 
-Overfull \hbox (37.14375pt too wide) in paragraph at lines 868--878
-\OT1/pcr/m/n/10 Arc\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 RwLock\OML/cmm/m/it/10 <\O
-T1/pcr/m/n/10 HashMap\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 u64,TagVirtualDirContext
-\OML/cmm/m/it/10 >>>
+Underfull \hbox (badness 10000) in paragraph at lines 871--884
+\OT1/pcr/m/n/10 HashMap\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 u64,TagVirtualDirConte
+xt\OML/cmm/m/it/10 >>> \OT1/ptm/m/n/10 (+20) and
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
-\OT1/ptm/m/n/10 (+20) map-ping vir-tual di-rec-tory in-ode IDs to their tag
+Underfull \hbox (badness 10000) in paragraph at lines 871--884
+\OT1/pcr/m/n/10 HashMap\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 u64,TagVirtualFileCont
+ext\OML/cmm/m/it/10 >>> \OT1/ptm/m/n/10 (+20) and
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
-\OT1/ptm/m/n/10 (+20) lists. The re-verse in-dex for virtual-to-real file
- []
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 868--878
-\OT1/ptm/m/n/10 (+20) map-ping is stored in \OT1/pcr/m/n/10 tag_virtual_files:
- []
-
-
-Overfull \hbox (43.84375pt too wide) in paragraph at lines 868--878
-\OT1/pcr/m/n/10 Arc\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 RwLock\OML/cmm/m/it/10 <\O
-T1/pcr/m/n/10 HashMap\OML/cmm/m/it/10 <\OT1/pcr/m/n/10 u64,TagVirtualFileContex
-t\OML/cmm/m/it/10 >>>\OT1/ptm/m/n/10 (-20) .
- []
-
-
-Underfull \hbox (badness 1577) in paragraph at lines 868--878
-\OT1/ptm/m/n/10 (+20) virtual-inode bi-jec-tion to pre-vent ID du-pli-ca-tion a
-cross
+Underfull \hbox (badness 10000) in paragraph at lines 871--884
+\OT1/ptm/m/n/10 (+20) maps main-tain the canonical-tag-string-to-virtual-inode
  []
 
 LaTeX Font Info:    Font shape `OT1/pcr/m/it' in size <10> not available
-(Font)              Font shape `OT1/pcr/m/sl' tried instead on input line 880.
+(Font)              Font shape `OT1/pcr/m/sl' tried instead on input line 886.
 
-Underfull \hbox (badness 2894) in paragraph at lines 880--888
+Underfull \hbox (badness 2894) in paragraph at lines 886--894
 \OT1/pcr/m/n/10 mnt/@tags/work/reports/ \OT1/ptm/m/n/10 (+20) trig-gers a se-qu
 ence of
  []
 
 
-Underfull \hbox (badness 1371) in paragraph at lines 880--888
+Underfull \hbox (badness 1371) in paragraph at lines 886--894
 \OT1/pcr/m/n/10 lookup() \OT1/ptm/m/n/10 (+20) calls for \OT1/pcr/m/n/10 @tags\
 OT1/ptm/m/n/10 (+20) , \OT1/pcr/m/n/10 work\OT1/ptm/m/n/10 (+20) , and \OT1/pcr
 /m/n/10 reports \OT1/ptm/m/n/10 (+20) in
  []
 
 
-Underfull \hbox (badness 2042) in paragraph at lines 888--890
+Underfull \hbox (badness 2042) in paragraph at lines 894--896
 []\OT1/ptm/m/n/10 (+20) Load the first tag's in-ode set from sled into a
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 890--893
+Underfull \hbox (badness 10000) in paragraph at lines 896--899
 []\OT1/ptm/m/n/10 (+20) For each sub-se-quent tag, load its in-ode
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 890--893
+Underfull \hbox (badness 10000) in paragraph at lines 896--899
 \OT1/ptm/m/n/10 (+20) set and call \OT1/pcr/m/n/10 candidates.retain(|id|
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 895--899
+Underfull \hbox (badness 10000) in paragraph at lines 901--905
 \OT1/ptm/m/n/10 (+20) The path is order-independent:
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 895--899
+Underfull \hbox (badness 10000) in paragraph at lines 901--905
 \OT1/pcr/m/n/10 mnt/@tags/reports/work/ \OT1/ptm/m/n/10 (+20) ap-plies the same
 
  []
@@ -871,56 +839,56 @@ Underfull \hbox (badness 10000) in paragraph at lines 895--899
 
 
 [7]
-Underfull \hbox (badness 2486) in paragraph at lines 910--915
+Underfull \hbox (badness 2486) in paragraph at lines 916--921
  \OT1/ptm/m/it/10 (+20) e) Tag con-trol in-ter-face.: [][] \OT1/ptm/m/n/10 (+20
 ) The TagFS con-trol file
  []
 
 
-Underfull \hbox (badness 5036) in paragraph at lines 923--929
+Underfull \hbox (badness 5036) in paragraph at lines 929--935
 \OT1/ptm/m/n/10 (+20) the rel-a-tive path to an in-ode ID by walk-ing sled
  []
 
 
-Underfull \hbox (badness 6157) in paragraph at lines 938--946
+Underfull \hbox (badness 6157) in paragraph at lines 944--952
 \OT1/ptm/m/n/10 (+20) checks \OT1/pcr/m/n/10 file_path.exists() \OT1/ptm/m/n/10
  (+20) and skips the write
  []
 
 
-Underfull \hbox (badness 6675) in paragraph at lines 938--946
+Underfull \hbox (badness 6675) in paragraph at lines 944--952
 \OT1/ptm/m/n/10 (+20) if the blob is al-ready present. A crash af-ter the
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 950--952
+Underfull \hbox (badness 10000) in paragraph at lines 956--958
 []\OT1/ptm/m/n/10 (+20) For each chunk bound-ary:
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 950--952
+Underfull \hbox (badness 10000) in paragraph at lines 956--958
 \OT1/pcr/m/n/10 storage.write_chunk(buffer) \OT1/ptm/m/n/10 (+20) (CAS blob
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 952--954
+Underfull \hbox (badness 10000) in paragraph at lines 958--960
 []\OT1/pcr/m/n/10 save_recipe(inode_id, &recipe) $\OMS/cmsy/m/n/10 !$
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 965--974
+Underfull \hbox (badness 10000) in paragraph at lines 971--980
  \OT1/ptm/m/it/10 (+20) c) Meta-data mu-ta-tions.: [][] \OT1/ptm/m/n/10 (+20) E
 v-ery call to
  []
 
 
-Underfull \hbox (badness 4403) in paragraph at lines 965--974
+Underfull \hbox (badness 4403) in paragraph at lines 971--980
 \OT1/pcr/m/n/10 save_inode()\OT1/ptm/m/n/10 (+20) , \OT1/pcr/m/n/10 save_dirent
 ()\OT1/ptm/m/n/10 (+20) , \OT1/pcr/m/n/10 save_recipe()\OT1/ptm/m/n/10 (+20) ,
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 965--974
+Underfull \hbox (badness 10000) in paragraph at lines 971--980
 \OT1/pcr/m/n/10 set_file_tags()\OT1/ptm/m/n/10 (+20) , \OT1/pcr/m/n/10 delete_f
 ile_tags()\OT1/ptm/m/n/10 (+20) , and
  []
@@ -928,107 +896,110 @@ ile_tags()\OT1/ptm/m/n/10 (+20) , and
 
 
 LaTeX Font Info:    Font shape `OT1/pcr/m/it' in size <8> not available
-(Font)              Font shape `OT1/pcr/m/sl' tried instead on input line 1020.
+(Font)              Font shape `OT1/pcr/m/sl' tried instead on input line 1026.
 
 
 
 [8]
-Underfull \hbox (badness 10000) in paragraph at lines 1066--1068
+Underfull \hbox (badness 10000) in paragraph at lines 1072--1074
 []\OT1/ptm/b/n/10 (+20) ArcFS\OT1/ptm/m/n/10 (+20) : The pro-posed sys-tem, mou
 nted with
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1066--1068
+Underfull \hbox (badness 10000) in paragraph at lines 1072--1074
 \OT1/pcr/m/n/10 --storage-dir /path/to/storage \OT1/ptm/m/n/10 (+20) on a
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1086--1092
+Underfull \hbox (badness 10000) in paragraph at lines 1092--1098
 []\OT1/ptm/m/n/10 (+20) A sep-a-rate \OT1/ptm/b/n/10 (+20) In-tegrity \OT1/ptm/
 m/n/10 (+20) class uses de-ter-min-is-tic
  []
 
 
-Underfull \hbox (badness 3291) in paragraph at lines 1086--1092
+Underfull \hbox (badness 3291) in paragraph at lines 1092--1098
 \OT1/ptm/m/n/10 (+20) physical-to-logical stor-age ra-tios across four sce-nar-
 ios:
  []
 
 
-Underfull \hbox (badness 7685) in paragraph at lines 1086--1092
+Underfull \hbox (badness 7685) in paragraph at lines 1092--1098
 \OT1/ptm/m/n/10 (+20) duplicate-file scal-ing, com-pres-sion spec-trum, snap-sh
 ot
  []
 
-<figures/arcfs_vs_ext4_by_class.png, id=48, 1517.67pt x 361.35pt>
+<figures/arcfs_vs_ext4_by_class.png, id=49, 1517.67pt x 361.35pt>
 File: figures/arcfs_vs_ext4_by_class.png Graphic file (type png)
 <use figures/arcfs_vs_ext4_by_class.png>
 Package pdftex.def Info: figures/arcfs_vs_ext4_by_class.png  used on input line
- 1097.
+ 1103.
 (pdftex.def)             Requested size: 252.0pt x 59.9951pt.
-<figures/responsive_per_job_bars.png, id=50, 1300.86pt x 722.7pt>
+<figures/responsive_per_job_bars.png, id=51, 1300.86pt x 722.7pt>
 File: figures/responsive_per_job_bars.png Graphic file (type png)
 <use figures/responsive_per_job_bars.png>
 Package pdftex.def Info: figures/responsive_per_job_bars.png  used on input lin
-e 1108.
+e 1114.
 (pdftex.def)             Requested size: 252.0pt x 139.9941pt.
 
 
-<figures/durable_per_job_bars.png, id=51, 1300.86pt x 722.7pt>
+<figures/durable_per_job_bars.png, id=52, 1300.86pt x 722.7pt>
 File: figures/durable_per_job_bars.png Graphic file (type png)
 <use figures/durable_per_job_bars.png>
 Package pdftex.def Info: figures/durable_per_job_bars.png  used on input line 1
-153.
+159.
 (pdftex.def)             Requested size: 252.0pt x 139.9941pt.
 
-
-[9 <./figures/arcfs_vs_ext4_by_class.png> <./figures/responsive_per_job_bars.pn
-g>]
-Underfull \hbox (badness 3428) in paragraph at lines 1174--1183
+Underfull \hbox (badness 3428) in paragraph at lines 1180--1189
 \OT1/ptm/m/n/10 (+20) (one \OT1/pcr/m/n/10 fsync \OT1/ptm/m/n/10 (+20) per 4KB 
 mod-i-fi-ca-tion), Ar-cFS achieved
  []
 
-<figures/integrity_summary.png, id=59, 1228.59pt x 361.35pt>
+
+
+[9 <./figures/arcfs_vs_ext4_by_class.png> <./figures/responsive_per_job_bars.pn
+g>]
+<figures/integrity_summary.png, id=61, 1228.59pt x 361.35pt>
 File: figures/integrity_summary.png Graphic file (type png)
 <use figures/integrity_summary.png>
-Package pdftex.def Info: figures/integrity_summary.png  used on input line 1188
+Package pdftex.def Info: figures/integrity_summary.png  used on input line 1194
 .
 (pdftex.def)             Requested size: 252.0pt x 74.11581pt.
 
-
-
-Underfull \hbox (badness 10000) in paragraph at lines 1210--1215
+Underfull \hbox (badness 10000) in paragraph at lines 1216--1221
 []\OT1/ptm/m/n/10 (+20) ArcFS ex-hibits higher wall-clock run-time on
  []
 
-<figures/dedup_curve.png, id=60, 722.7pt x 433.62pt>
+
+
+<figures/dedup_curve.png, id=62, 722.7pt x 433.62pt>
 File: figures/dedup_curve.png Graphic file (type png)
 <use figures/dedup_curve.png>
-Package pdftex.def Info: figures/dedup_curve.png  used on input line 1220.
+Package pdftex.def Info: figures/dedup_curve.png  used on input line 1226.
 (pdftex.def)             Requested size: 252.0pt x 151.20026pt.
-<figures/compression_efficiency.png, id=61, 867.24pt x 433.62pt>
+<figures/compression_efficiency.png, id=63, 867.24pt x 433.62pt>
 File: figures/compression_efficiency.png Graphic file (type png)
 <use figures/compression_efficiency.png>
 Package pdftex.def Info: figures/compression_efficiency.png  used on input line
- 1251.
+ 1257.
 (pdftex.def)             Requested size: 252.0pt x 125.998pt.
+<figures/snapshot_growth.png, id=64, 722.7pt x 433.62pt>
+File: figures/snapshot_growth.png Graphic file (type png)
+<use figures/snapshot_growth.png>
+Package pdftex.def Info: figures/snapshot_growth.png  used on input line 1285.
+(pdftex.def)             Requested size: 252.0pt x 151.20026pt.
 
 
 [10 <./figures/durable_per_job_bars.png> <./figures/integrity_summary.png> <./f
 igures/dedup_curve.png>]
-<figures/snapshot_growth.png, id=68, 722.7pt x 433.62pt>
-File: figures/snapshot_growth.png Graphic file (type png)
-<use figures/snapshot_growth.png>
-Package pdftex.def Info: figures/snapshot_growth.png  used on input line 1279.
-(pdftex.def)             Requested size: 252.0pt x 151.20026pt.
+Underfull \vbox (badness 3815) has occurred while \output is active []
 
 
-<figures/summary_heatmap.png, id=69, 1204.5pt x 618.05907pt>
+
+<figures/summary_heatmap.png, id=71, 1204.5pt x 618.05907pt>
 File: figures/summary_heatmap.png Graphic file (type png)
 <use figures/summary_heatmap.png>
-Package pdftex.def Info: figures/summary_heatmap.png  used on input line 1324.
+Package pdftex.def Info: figures/summary_heatmap.png  used on input line 1330.
 (pdftex.def)             Requested size: 252.0pt x 129.30583pt.
 
 
@@ -1036,7 +1007,7 @@ Package pdftex.def Info: figures/summary_heatmap.png  used on input line 1324.
 igures/summary_heatmap.png>]
 
 
-Underfull \hbox (badness 3029) in paragraph at lines 1472--1486
+Underfull \hbox (badness 3029) in paragraph at lines 1478--1492
 \OT1/ptm/m/n/10 (+20) the \OT1/pcr/m/n/10 snapshot:\OML/cmm/m/it/10 <\OT1/pcr/m
 /n/10 name\OML/cmm/m/it/10 > \OT1/ptm/m/n/10 (+20) sled key; the O($\OML/cmm/m/
 it/10 n[]$\OT1/ptm/m/n/10 (+20) ) cloned
@@ -1045,13 +1016,13 @@ it/10 n[]$\OT1/ptm/m/n/10 (+20) ) cloned
 
 
 [12]
-Underfull \hbox (badness 1748) in paragraph at lines 1523--1532
+Underfull \hbox (badness 1748) in paragraph at lines 1529--1538
  \OT1/ptm/m/it/10 (+20) g) L7 | Single-threaded FUSE dis-patch.: [][] Im-pact\O
 T1/ptm/m/n/10 (+20) :
  []
 
 
-Underfull \hbox (badness 1515) in paragraph at lines 1523--1532
+Underfull \hbox (badness 1515) in paragraph at lines 1529--1538
 \OT1/ptm/m/n/10 (+20) and add in-te-rior mu-ta-bil-ity (e.g., \OT1/pcr/m/n/10 D
 ashMap \OT1/ptm/m/n/10 (+20) in-stead of
  []
@@ -1059,17 +1030,17 @@ ashMap \OT1/ptm/m/n/10 (+20) in-stead of
 
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1563--1578
+Underfull \hbox (badness 10000) in paragraph at lines 1569--1584
 []\OT1/ptm/m/n/10 (+20) The write-back cache---a
  []
 
 
-Underfull \hbox (badness 1953) in paragraph at lines 1563--1578
+Underfull \hbox (badness 1953) in paragraph at lines 1569--1584
 \OT1/ptm/m/n/10 (+20) en-tries by an LRU or-der main-tained in a com-pan-ion
  []
 
 
-Underfull \hbox (badness 2165) in paragraph at lines 1563--1578
+Underfull \hbox (badness 2165) in paragraph at lines 1569--1584
 \OT1/ptm/m/n/10 (+20) cross-file hash-state con-tam-i-na-tion. The of-fline gar
 bage
  []
@@ -1084,6 +1055,10 @@ Package balance Warning: You have called \balance in second column
 
 
 
+
+Overfull \vbox (1.73193pt too high) has occurred while \output is active []
+
+
 [14] (./paper_journal.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
@@ -1091,11 +1066,11 @@ L3 programming layer <2025-01-18>
  ***********
  ) 
 Here is how much of TeX's memory you used:
- 9344 strings out of 473190
- 143664 string characters out of 5715801
- 620367 words of memory out of 5000000
- 32056 multiletter control sequences out of 15000+600000
- 625887 words of font info for 395 fonts, out of 8000000 for 9000
+ 9371 strings out of 473190
+ 143947 string characters out of 5715801
+ 620848 words of memory out of 5000000
+ 32063 multiletter control sequences out of 15000+600000
+ 628776 words of font info for 410 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  57i,10n,65p,1010b,1043s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb
@@ -1108,21 +1083,23 @@ cal/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cmextra/cmmib9.pfb></us
 r/local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/
 local/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/loc
 al/texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr8.pfb></usr/local/
-texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/t
-exlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/tex
-live/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texli
-ve/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive
-/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/
-2025/texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb></usr/local/texlive/2025/tex
-mf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2025/texmf-dist/
-fonts/type1/urw/courier/ucrro8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/t
-ype1/urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/t
-imes/utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmr
-8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on paper_journal.pdf (14 pages, 1138905 bytes).
+texlive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/local/tex
+live/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/local/texl
+ive/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/local/texliv
+e/2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/local/texlive/
+2025/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/local/texlive/20
+25/texmf-dist/fonts/type1/public/amsfonts/cm/cmti10.pfb></usr/local/texlive/202
+5/texmf-dist/fonts/type1/public/amsfonts/cm/cmti9.pfb></usr/local/texlive/2025/
+texmf-dist/fonts/type1/urw/courier/ucrb8a.pfb></usr/local/texlive/2025/texmf-di
+st/fonts/type1/urw/courier/ucrr8a.pfb></usr/local/texlive/2025/texmf-dist/fonts
+/type1/urw/courier/ucrro8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/
+urw/times/utmb8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/
+utmbi8a.pfb></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmr8a.pf
+b></usr/local/texlive/2025/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
+Output written on paper_journal.pdf (14 pages, 1161478 bytes).
 PDF statistics:
- 179 PDF objects out of 1000 (max. 8388607)
- 101 compressed objects within 2 object streams
+ 189 PDF objects out of 1000 (max. 8388607)
+ 107 compressed objects within 2 object streams
  0 named destinations out of 1000 (max. 500000)
- 69161 words of extra memory for PDF output out of 74296 (max. 10000000)
+ 74281 words of extra memory for PDF output out of 74296 (max. 10000000)
 

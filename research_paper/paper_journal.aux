@@ -39,18 +39,21 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}FUSE Handler and Inode Registry}{4}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-B}}Write-Back LRU Cache}{4}{}\protected@file@percent }
 \newlabel{sec:cache}{{\mbox  {IV-B}}{4}{}{subsection.4.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0a}Write path.}{4}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0b}LRU maintenance.}{4}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0c}Eviction.}{5}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0d}Flush triggers.}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0a}Data map.}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0b}LRU order.}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0c}Write path.}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0d}LRU maintenance.}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0e}Eviction.}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-B}0f}Flush triggers.}{5}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-C}}FastCDC Chunking Engine}{5}{}\protected@file@percent }
 \newlabel{sec:cdc}{{\mbox  {IV-C}}{5}{}{subsection.4.3}{}}
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0a}Gear-hash table construction.}{5}{}\protected@file@percent }
+\newlabel{eq:gear_matrix}{{1}{5}{}{equation.1}{}}
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0b}Rolling hash update and boundary detection.}{5}{}\protected@file@percent }
-\newlabel{eq:gear}{{1}{5}{}{equation.1}{}}
+\newlabel{eq:gear}{{2}{5}{}{equation.2}{}}
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0c}Intra-file boundary reset.}{5}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-C}0d}Cross-file isolation.}{5}{}\protected@file@percent }
-\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces CDC Boundary Detection in \texttt  {create\_recipe\_from\_data()}}}{5}{}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces CDC Boundary Detection (\texttt  {create\_recipe\_from\_data()})}}{5}{}\protected@file@percent }
 \newlabel{alg:cdc}{{1}{5}{}{algorithm.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-D}}Content-Addressable Storage}{5}{}\protected@file@percent }
 \newlabel{sec:cas}{{\mbox  {IV-D}}{5}{}{subsection.4.4}{}}
@@ -77,15 +80,15 @@
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0a}Persistent state.}{7}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0b}In-memory indexes.}{7}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0c}Tag-intersection at \texttt  {readdir} time.}{7}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0d}Virtual inode allocation.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0d}Virtual inode allocation.}{7}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-H}0e}Tag control interface.}{8}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-I}}Crash Recovery Analysis}{8}{}\protected@file@percent }
 \newlabel{sec:crash}{{\mbox  {IV-I}}{8}{}{subsection.4.9}{}}
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0a}Safe window: CAS write.}{8}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0b}Critical window: between CAS write and recipe commit.}{8}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0c}Metadata mutations.}{8}{}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Evaluation System Configuration}}{8}{}\protected@file@percent }
 \newlabel{tab:sysconfig}{{II}{8}{}{table.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0c}Metadata mutations.}{8}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {IV-I}0d}Snapshot creation crash.}{8}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {V}Experimental Evaluation}{8}{}\protected@file@percent }
 \newlabel{sec:eval}{{V}{8}{}{section.5}{}}
@@ -94,10 +97,10 @@
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {V-A}0b}Benchmark profiles.}{8}{}\protected@file@percent }
 \@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces fio Benchmark Profile Parameters}}{9}{}\protected@file@percent }
 \newlabel{tab:fio}{{III}{9}{}{table.3}{}}
-\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {V-A}0c}Benchmark classes.}{9}{}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Responsive Class}{9}{}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces ArcFS write bandwidth relative to ext4 across the responsive (left) and durable (right) evaluation classes. ArcFS outperforms ext4 by up to $9.2\times $ in the responsive class; the gap narrows under durable fsync constraints, confirming that write-back buffering, not measurement artifact, explains the responsive advantage.}}{9}{}\protected@file@percent }
 \newlabel{fig:class_compare}{{1}{9}{}{figure.1}{}}
+\@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {V-A}0c}Benchmark classes.}{9}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-B}}Responsive Class}{9}{}\protected@file@percent }
 \@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Responsive class write bandwidth per benchmark profile across all four filesystem targets. ArcFS dominates all five profiles through write-back coalescing. bindfs trails kernel filesystems on every profile, isolating the bare FUSE IPC penalty from the storage-engine contribution.}}{9}{}\protected@file@percent }
 \newlabel{fig:responsive}{{2}{9}{}{figure.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {V-C}}Durable Class}{9}{}\protected@file@percent }
@@ -140,6 +143,8 @@
 \bibdata{references}
 \bibcite{restic2024}{1}
 \bibcite{borgbackup2024}{2}
+\bibcite{vangoor2017fuse}{3}
+\bibcite{soules2003metadata}{4}
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0d}L4 — No on-read chunk integrity verification.}{13}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0e}L5 — No encryption; hash-oracle side channel.}{13}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0f}L6 — GC active-set memory is unbounded.}{13}{}\protected@file@percent }
@@ -148,8 +153,6 @@
 \@writefile{toc}{\contentsline {paragraph}{\numberline {\mbox  {VII-}0i}L9 — Read path not benchmarked.}{13}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{13}{}\protected@file@percent }
 \@writefile{toc}{\contentsline {section}{References}{13}{}\protected@file@percent }
-\bibcite{vangoor2017fuse}{3}
-\bibcite{soules2003metadata}{4}
 \bibcite{zhu2008dedup}{5}
 \bibcite{sled2024}{6}
 \bibcite{muthitacharoen2001lbfs}{7}

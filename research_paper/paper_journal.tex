@@ -463,22 +463,23 @@ highest observed inode ID to prevent ID reuse.
 \label{sec:cache}
 
 The cache is the primary mechanism for mitigating FUSE context-switch
-overhead.  It is implemented as two coordinated structures:
+overhead.  It is implemented as two coordinated structures.
 
-\begin{enumerate}
-\item \textbf{Data map}: \texttt{Arc\textless{}RwLock\textless{}HashMap%
-\textless{}u64,\;(Vec\textless{}u8\textgreater{},\;bool)\textgreater{}%
-\textgreater{}\textgreater{}\textgreater{}}, keyed by inode ID.  The
-\texttt{u64} key is the inode identifier; the \texttt{Vec\textless{}u8\textgreater{}}
-value holds the accumulated write buffer for that inode; the \texttt{bool}
-flag records whether the entry is dirty (i.e., the buffer contains data
-not yet committed to the CAS layer and sled).
+\paragraph{Data map.}
+An \texttt{Arc\textless{}RwLock\textless{}HashMap\textless{}u64,\allowbreak
+(Vec\textless{}u8\textgreater{},\,bool)\textgreater{}\textgreater{}\textgreater{}}
+keyed by inode ID.  The \texttt{u64} key is the inode identifier;
+the \texttt{Vec\textless{}u8\textgreater{}} value holds the accumulated
+write buffer for that inode; the \texttt{bool} flag records whether the
+entry is dirty (i.e., the buffer contains data not yet committed to the
+CAS layer and sled).
 
-\item \textbf{LRU order}: \texttt{Arc\textless{}RwLock\textless{}%
-VecDeque\textless{}u64\textgreater{}\textgreater{}\textgreater{}}, holding
-inode IDs in least-recently-used to most-recently-used order (front to
-back).
-\end{enumerate}
+\paragraph{LRU order.}
+An \texttt{Arc\textless{}\allowbreak{}RwLock\textless{}\allowbreak{}%
+VecDeque\textless{}u64\textgreater{}\textgreater{}\textgreater{}}
+holding inode IDs in least-recently-used to most-recently-used order
+(front to back). This structure tracks access order so that eviction
+always removes the inode whose last write occurred furthest in the past.
 
 The cache capacity is 1,024 entries (constant \texttt{PAGE\_CACHE\_CAPACITY}).
 
@@ -537,14 +538,15 @@ The 256-entry \texttt{GEAR\_MATRIX} is a compile-time constant built by
 \texttt{build\_gear\_matrix()}, a \texttt{const fn} that chains
 \texttt{splitmix64}-derived 64-bit values.  Starting from a fixed 64-bit
 seed \texttt{0x1234\_5678\_9ABC\_DEF0}, each entry is computed as:
-\[
+\begin{align}
   \mathit{GEAR}[i] \;\leftarrow\;
     \texttt{splitmix64}\!\left(\mathit{seed}_{\,i-1}
       \;\oplus\;
-      \bigl(i \times \texttt{0x9E3779B97F4A7C15}\bigr)\right)
-\]
-where \texttt{0x9E3779B97F4A7C15} is the 64-bit Fibonacci hashing
-constant (the golden ratio scaled to 64 bits).  The XOR with the
+      (i \times \phi_{64})\right)
+  \label{eq:gear_matrix}
+\end{align}
+where $\phi_{64} = \texttt{0x9E3779B97F4A7C15}$ is the 64-bit
+Fibonacci hashing constant (the golden ratio scaled to fill 64 bits).  The XOR with the
 index-scaled golden ratio ensures that entries are uniformly distributed
 even for small indices, and the \texttt{splitmix64} bijection preserves
 that distribution.  The table is statically embedded in the binary;
@@ -589,28 +591,29 @@ Algorithm~\ref{alg:cdc} summarizes the complete boundary-detection
 procedure.
 
 \begin{algorithm}
-\caption{CDC Boundary Detection in \texttt{create\_recipe\_from\_data()}}
+\caption{CDC Boundary Detection (\texttt{create\_recipe\_from\_data()})}
 \label{alg:cdc}
+\small
 \begin{algorithmic}[1]
-\REQUIRE byte stream $B$, constants MIN\,=\,2048, MAX\,=\,65536,
-         MASK\,=\,4095
-\STATE $h \leftarrow 0$; \quad $\mathit{buf} \leftarrow []$; \quad
+\REQUIRE byte stream $B$; MIN\,=\,2048, MAX\,=\,65536, MASK\,=\,4095
+\STATE $h \leftarrow 0$;\; $\mathit{buf} \leftarrow []$;\;
        $\mathit{recipe} \leftarrow []$
 \FORALL{byte $b \in B$}
-  \STATE $h \leftarrow (h \ll 1) + \mathit{GEAR}[b]$
-  \STATE $\mathit{buf}.\text{push}(b)$
-  \IF{$|\mathit{buf}| \geq \text{MIN}$ \textbf{and}
-      ($|\mathit{buf}| \geq \text{MAX}$ \textbf{or}
-       $h \;\&\; \mathit{MASK} = 0$)}
-    \STATE $\mathit{hash} \leftarrow \texttt{sha256}(\mathit{buf})$
-    \STATE $\texttt{cas.write\_chunk}(\mathit{buf})$
-    \STATE $\mathit{recipe}.\text{push}(\mathit{hash})$
-    \STATE $\mathit{buf}.\text{clear}()$; \quad $h \leftarrow 0$
-           \COMMENT{chunker.reset()}
+  \STATE $h \leftarrow (h \ll 1) + \mathit{GEAR}[b]$;\;
+         $\mathit{buf}.\text{push}(b)$
+  \STATE \textbf{let} $\mathit{cut} \leftarrow
+         |\mathit{buf}| \geq \text{MAX}$ \textbf{or}
+         $(|\mathit{buf}| \geq \text{MIN}$ \textbf{and}
+         $h \mathbin{\&} \mathit{MASK} = 0)$
+  \IF{$\mathit{cut}$}
+    \STATE $\mathit{hash} \leftarrow \texttt{sha256}(\mathit{buf})$;\;
+           $\texttt{cas.write}(\mathit{buf})$
+    \STATE $\mathit{recipe}.\text{push}(\mathit{hash})$;\;
+           $\mathit{buf} \leftarrow []$;\; $h \leftarrow 0$
   \ENDIF
 \ENDFOR
 \IF{$|\mathit{buf}| > 0$}
-  \STATE flush tail chunk (same as above)
+  \STATE flush tail chunk (same steps as lines 5--7)
 \ENDIF
 \RETURN $\mathit{recipe}$
 \end{algorithmic}
@@ -671,22 +674,23 @@ unflushed data.  Table~\ref{tab:schema} shows the full key namespace.
 \label{tab:schema}
 \centering
 \renewcommand{\arraystretch}{1.2}
-\begin{tabular}{p{4.8cm}p{3.6cm}}
+\footnotesize
+\begin{tabular}{p{4.2cm}p{3.6cm}}
 \toprule
 \textbf{Key Pattern} & \textbf{Value} \\
 \midrule
 \texttt{ino\_meta:\textless{}id\textgreater{}} &
   \texttt{InodeMetadata} (bincode) \\
 \texttt{ino\_recipe:\textless{}id\textgreater{}} &
-  \texttt{FileRecipe}: ordered chunk hash list + file size \\
-\texttt{dirent:\textless{}parent\textgreater{}:\textless{}name\textgreater{}} &
+  \texttt{FileRecipe}: chunk hash list + size \\
+\texttt{dirent:\textless{}par\textgreater{}:\textless{}name\textgreater{}} &
   Child inode ID (\texttt{u64}) \\
 \texttt{ino\_tags:\textless{}id\textgreater{}} &
-  \texttt{FileTagSet}: inode ID, filename, sorted tag list \\
+  \texttt{FileTagSet}: id, name, tag list \\
 \texttt{tag\_index:\textless{}tag\textgreater{}} &
   Sorted \texttt{Vec\textless{}u64\textgreater{}} of inode IDs \\
 \texttt{snapshot:\textless{}name\textgreater{}} &
-  \texttt{SnapshotMetadata}: name, Unix timestamp, root inode ID \\
+  \texttt{SnapshotMetadata}: name, ts, root ID \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -716,24 +720,23 @@ gives the exact procedure as implemented in \texttt{FileManager::run\_gc()}.
 \begin{algorithm}
 \caption{Offline Garbage Collection (\texttt{run\_gc()})}
 \label{alg:gc}
+\small
 \begin{algorithmic}[1]
 \REQUIRE sled database $\mathit{db}$, CAS storage $\mathit{store}$
-\ENSURE orphaned CAS blobs are deleted; referenced blobs are preserved
-\STATE $\mathit{active} \leftarrow \emptyset$
-  \COMMENT{HashSet$\langle$String$\rangle$}
-\FORALL{$(\_,\;\mathit{bytes})$ in $\mathit{db}.\texttt{scan\_prefix}(\texttt{"ino\_recipe:"})$}
-  \STATE $\mathit{recipe} \leftarrow \texttt{bincode::deserialize}(\mathit{bytes})$
-  \FORALL{$\mathit{hash}$ in $\mathit{recipe}.\mathit{chunks}$}
-    \STATE $\mathit{active}.\text{insert}(\mathit{hash})$
+\ENSURE orphaned blobs deleted; referenced blobs preserved
+\STATE $\mathit{active} \leftarrow \emptyset$ \; \COMMENT{HashSet$\langle$String$\rangle$}
+\FORALL{$(\_,\;\mathit{bytes})$ \textbf{in} $\mathit{db}$.\texttt{scan\_prefix}(\texttt{"ino\_recipe:"})}
+  \STATE $r \leftarrow \texttt{deserialize}(\mathit{bytes})$
+  \FORALL{$h$ \textbf{in} $r.\mathit{chunks}$}
+    \STATE $\mathit{active}.\text{insert}(h)$
   \ENDFOR
 \ENDFOR
 \STATE $\mathit{all} \leftarrow \mathit{store}.\texttt{list\_all\_chunks}()$
-  \COMMENT{walks \texttt{cas/\{prefix\}/} on disk}
 \STATE $\mathit{deleted} \leftarrow 0$
-\FORALL{$\mathit{hash}$ in $\mathit{all}$}
-  \IF{$\mathit{hash} \notin \mathit{active}$}
-    \STATE $\mathit{store}.\texttt{delete\_chunk}(\mathit{hash})$
-    \STATE $\mathit{deleted} \leftarrow \mathit{deleted} + 1$
+\FORALL{$h$ \textbf{in} $\mathit{all}$}
+  \IF{$h \notin \mathit{active}$}
+    \STATE $\mathit{store}.\texttt{delete\_chunk}(h)$;\;
+           $\mathit{deleted} \mathrel{+}= 1$
   \ENDIF
 \ENDFOR
 \RETURN $\mathit{deleted}$
@@ -803,7 +806,7 @@ with respect to disk failures):
   all inode IDs in the page cache and flushes each dirty entry through
   the CAS pipeline before the snapshot is taken.  This ensures the
   snapshot captures the fully committed state.
-\item Call \texttt{clone\_subtree\_from\_metadata(FUSE\_ROOT\_ID, ...)},
+\item Call \texttt{clone\_subtree\_from\_\allowbreak{}metadata(\allowbreak{}FUSE\_ROOT\_ID,\,\ldots)},
   which recursively deep-clones the live inode tree: for each inode,
   a new inode ID is allocated from \texttt{next\_inode}, a new
   \texttt{InodeMetadata} record is saved, the source inode's
@@ -866,13 +869,16 @@ corresponding inode metadata.
 
 \paragraph{In-memory indexes.}
 At mount time, \texttt{hydrate\_tree()} populates both persistent indexes
-into memory.  The forward in-memory index is represented as
-\texttt{tag\_virtual\_dirs: Arc\textless{}RwLock\textless{}%
-HashMap\textless{}u64,\;TagVirtualDirContext\textgreater{}\textgreater{}\textgreater{}}
-mapping virtual directory inode IDs to their tag lists.  The reverse
-index for virtual-to-real file mapping is stored in
-\texttt{tag\_virtual\_files: Arc\textless{}RwLock\textless{}%
-HashMap\textless{}u64,\;TagVirtualFileContext\textgreater{}\textgreater{}\textgreater{}}.
+into memory.  The forward in-memory index (\texttt{tag\_virtual\_dirs})
+is typed as \texttt{Arc\textless{}\allowbreak{}RwLock\textless{}\allowbreak{}%
+HashMap\textless{}u64,\,\allowbreak{}TagVirtualDirContext%
+\textgreater{}\textgreater{}\textgreater{}}
+and maps virtual directory inode IDs to their tag lists.  The reverse
+index (\texttt{tag\_virtual\_files}) is typed as
+\texttt{Arc\textless{}\allowbreak{}RwLock\textless{}\allowbreak{}%
+HashMap\textless{}u64,\,\allowbreak{}TagVirtualFileContext%
+\textgreater{}\textgreater{}\textgreater{}}
+and maps virtual file inodes to their real inode IDs.
 Two additional maps maintain the canonical-tag-string-to-virtual-inode
 bijection to prevent ID duplication across repeated \texttt{readdir} calls.
 
