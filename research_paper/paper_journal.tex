@@ -77,8 +77,9 @@ $n_i$.
 
 A semantic virtual filesystem layer (TagFS) overlays the namespace and
 resolves composite tag paths through lazy set-intersection over
-dual-structure in-memory maps, allowing files to appear under multiple
-tag hierarchies without data duplication.  The write-back page cache is
+sled-backed tag indexes, with in-memory virtual-inode caches for tag
+directories and files. This allows files to appear under multiple tag
+hierarchies without data duplication. The write-back page cache is
 implemented as a \texttt{HashMap\textless{}u64,(Vec\textless{}u8\textgreater{},bool)\textgreater{}}
 bounded at 1,024 entries by an LRU policy maintained through a
 companion \texttt{VecDeque\textless{}u64\textgreater{}}, deferring the
@@ -161,9 +162,9 @@ small writes before committing them to the CAS pipeline, reducing the
 per-write FUSE round-trip count. The sled embedded database~\cite{sled2024}
 provides ACID key-value semantics with a prefixed key schema that encodes
 inode-to-recipe mappings as separate relations from chunk payloads,
-isolating logical metadata from immutable physical data.  The LRU bound
-imposes a hard upper bound on the in-memory footprint regardless of
-dataset size.
+isolating logical metadata from immutable physical data. The LRU bound
+caps the number of cached inodes; the total byte footprint still depends
+on the sizes of buffered files.
 
 The contributions of this paper are as follows:
 \begin{enumerate}
@@ -194,11 +195,11 @@ The contributions of this paper are as follows:
   makes the GC conservative in practice.
 
 \item \textbf{TagFS virtual ontology engine.} A semantic navigation layer
-  that resolves composite tag paths via lazy set-intersection over dual
-  in-memory maps, backed by a persistent sled store, with mount-time
-  hydration cost proportional to tagged file count rather than total file
-  count.  The control interface accepts live tag mutations via a sentinel
-  file without requiring a remount cycle.
+  that resolves composite tag paths via lazy set-intersection over
+  sled-backed tag indexes, with virtual inode caches populated lazily at
+  \texttt{lookup}/\texttt{readdir} time (no mount-time materialization).
+  The control interface accepts live tag mutations via a sentinel file
+  without requiring a remount cycle.
 
 \item \textbf{Benchmark methodology separating acceptance-path from
   persistence-path cost.} A three-class benchmark campaign (responsive,
@@ -274,12 +275,12 @@ that virtual directory construction from tag intersections is feasible
 without modifying application binaries.
 
 ArcFS extends this approach in two ways. First, intersections are computed
-lazily at \texttt{readdir} time over dual in-memory maps rather than
-materialized on disk, avoiding the write amplification of pre-computing all
-tag intersections.  Second, the tag control file (\texttt{.tagfs\_ctl}) at
-the filesystem root accepts line-oriented \texttt{set} and \texttt{del}
-commands without requiring an unmount cycle, enabling live tag mutation from
-any POSIX-compatible process.
+lazily at \texttt{readdir}/\texttt{lookup} time by querying sled-backed tag
+indexes and caching virtual inode identities in memory, rather than
+materializing all tag intersections on disk.  Second, the tag control file
+(\texttt{.tagfs\_ctl}) at the filesystem root accepts line-oriented
+\texttt{set} and \texttt{del} commands without requiring an unmount cycle,
+enabling live tag mutation from any POSIX-compatible process.
 
 \subsection{Content-Defined Chunking and Deduplication}
 
@@ -408,31 +409,32 @@ VFS calls to two data structures: a per-process inode registry typed as
 Arc\textless{}RwLock\textless{}Inode\textgreater{}\textgreater{}%
 \textgreater{}\textgreater{}\textgreater{}} and a persistent sled database.
 
-Inode identifiers occupy two non-overlapping ranges.  Real inodes carry
-identifiers below 1,000,000 and are backed by the sled database and the
-CAS store; their state survives remounts.  Virtual TagFS inodes use
-identifiers at or above \texttt{VIRTUAL\_INODE\_START} = 1,000,000 and
-are allocated from an \texttt{AtomicU64} counter initialized at mount
-time; they exist only in the running daemon's memory and are never
-persisted.  Five reserved identifiers anchor the fixed namespace:
+Inode identifiers use two ranges by convention.  Virtual TagFS inodes
+start at \texttt{VIRTUAL\_INODE\_START} = 1,000,000 and are allocated
+from an \texttt{AtomicU64} counter initialized at mount time; they exist
+only in the running daemon's memory and are never persisted.  Real inodes
+are allocated from a separate \texttt{next\_inode} counter (initialized
+to 100) and are expected to remain below this boundary in current
+deployments, though the prototype does not enforce a hard separation.
+Five reserved identifiers anchor the fixed namespace:
 root (1), \texttt{.snapshots/} (2), snapshot-create sentinel (3),
 \texttt{@tags/} (4), and the TagFS control file (5).
 
-File creation executes a five-step atomic transaction: (i)~monotonic ID
+File creation executes a five-step sequence: (i)~monotonic ID
 assignment via \texttt{AtomicU64::fetch\_add}, (ii)~\texttt{InodeMetadata}
 instantiation, (iii)~dual database write: one \texttt{sled::Db::insert}
 for the metadata record under key \texttt{ino\_meta:\textless{}id\textgreater{}}
 and one for the directory-entry edge under
 \texttt{dirent:\textless{}parent\textgreater{}:\textless{}name\textgreater{}},
 (iv)~empty \texttt{FileRecipe} pre-allocation, and (v)~registry injection.
-Each step is followed by \texttt{Tree::flush()}, which calls
-\texttt{sync\_all()} on the underlying file, ensuring the record is
-durably persisted before the next step executes.  A daemon crash between
-any two steps leaves state that is partially written to sled; the
-registry is rebuilt by scanning all \texttt{ino\_meta:} and
-\texttt{dirent:} entries at the next mount, so partial writes produce
-an orphaned but self-consistent inode whose cleanup is deferred to the
-next garbage collection run.
+Each persistence call ends with \texttt{Tree::flush()}, which calls
+\texttt{sync\_all()} on the underlying file; steps are durable
+individually but are not atomic as a group.  A daemon crash between
+steps leaves state that is partially written to sled; the registry is
+rebuilt by scanning \texttt{dirent:} edges and loading the corresponding
+\texttt{ino\_meta:} records at the next mount.  Orphaned inode metadata
+can therefore remain in the database until an explicit metadata sweep
+is implemented (the current GC only reclaims CAS blobs).
 
 Lock ordering is strict and enforced by code review to prevent
 deadlocks under concurrent FUSE workloads.  The mandatory acquisition
@@ -825,21 +827,15 @@ sled-level cost is O(inodes): one \texttt{insert} and one \texttt{flush}
 per inode in the snapshot tree.
 
 \paragraph{CoW semantics on live writes.}
-After a snapshot exists, any modification to a live inode that is also
-reachable from a snapshot triggers CoW via \texttt{get\_mutable\_inode()}.
-The function walks the path from root to the target inode; at each node,
-it checks \texttt{Arc::strong\_count(child\_arc\_ref) > 1}.  A count
-greater than one indicates that the child's \texttt{Arc} is shared with
-at least one snapshot.  In that case, a new inode ID is allocated, a
-new \texttt{Inode} is constructed with the same attributes but the new
-ID, and the \texttt{Arc} in the parent's \texttt{children} HashMap is
-replaced atomically with a pointer to the new inode.  The new inode ID
-is also inserted into the global \texttt{inode\_registry}.
-
-The snapshot continues to hold its \texttt{Arc} to the original inode
-unchanged.  Subsequent writes to the live namespace affect only the
-newly allocated inode; the snapshot's view is frozen at the state at
-snapshot-creation time.
+The prototype isolates snapshots by deep-cloning inode metadata at
+snapshot creation time and assigning new inode IDs to the snapshot tree.
+Live and snapshot inodes are therefore distinct in memory; both point to
+the same CAS blobs through copied recipes.  Subsequent writes to live
+files generate new chunks and update only the live inode's recipe, while
+the snapshot continues to reference the original recipe.  Directory
+mutations in the live tree still invoke \texttt{get\_mutable\_inode()},
+but because snapshots are deep-cloned, the \texttt{Arc::strong\_count}
+guard typically remains 1 and no per-write inode cloning is triggered.
 
 \paragraph{Read-only enforcement.}
 Snapshot inodes are served with \texttt{perm = 0o555} in both
@@ -868,8 +864,9 @@ is called once at the end.  A tag mapping therefore never outlives its
 corresponding inode metadata.
 
 \paragraph{In-memory indexes.}
-At mount time, \texttt{hydrate\_tree()} populates both persistent indexes
-into memory.  The forward in-memory index (\texttt{tag\_virtual\_dirs})
+TagFS does not preload tag indexes at mount.  Instead, it lazily
+populates virtual inode caches during \texttt{lookup} and
+\texttt{readdir}. The forward in-memory index (\texttt{tag\_virtual\_dirs})
 is typed as \texttt{Arc\textless{}\allowbreak{}RwLock\textless{}\allowbreak{}%
 HashMap\textless{}u64,\,\allowbreak{}TagVirtualDirContext%
 \textgreater{}\textgreater{}\textgreater{}}
@@ -933,6 +930,13 @@ entries, then replaces the tag list atomically.  \texttt{del} calls
 \texttt{ino\_tags:} record and the reverse entries in all affected
 \texttt{tag\_index:} sets.
 
+\paragraph{Auto-tagging on create.}
+When creating a live file under a tag-derived virtual directory, ArcFS
+materializes the corresponding real path and, if the new file has no
+existing tags, derives tags from its parent directory ancestry (e.g.,
+creating \texttt{@tags/work/2026/report.txt} assigns \texttt{work, 2026})
+to preserve semantic navigation without an explicit tag command.
+
 \subsection{Crash Recovery Analysis}
 \label{sec:crash}
 
@@ -940,15 +944,16 @@ ArcFS does not implement a write-ahead log for CAS operations; its crash
 recovery properties arise from the sled \texttt{flush()} call discipline
 and the idempotency of individual operations.
 
-\paragraph{Safe window: CAS write.}
+\paragraph{Unsafe window: CAS write.}
 \texttt{write\_chunk()} first checks \texttt{file\_path.exists()} and
 skips the write if the blob is already present.  A crash after the
-\texttt{file\_path.exists()} check but before \texttt{write\_all()}
-completes may leave a truncated zstd frame at the destination path.
-On the next write of the same chunk, the existence check returns
-\texttt{true} and the write is skipped; the truncated frame is never
-referenced by any recipe (since the recipe commit had not yet occurred)
-and will be deleted by the next GC invocation.
+destination path is created but before \texttt{write\_all()} completes
+may leave a truncated zstd frame at that path.  Subsequent writes of the
+same chunk will treat the existing path as valid and skip the rewrite,
+and \texttt{read\_chunk()} performs no hash verification, so corrupted
+data could be served if a later recipe references that hash.  A safe
+implementation would write to a temporary path and atomically rename, or
+verify the decompressed hash before accepting a cached chunk.
 
 \paragraph{Critical window: between CAS write and recipe commit.}
 The sequence inside \texttt{write\_file\_by\_id()} is:
@@ -1558,6 +1563,26 @@ latency proportional to file size and chunk count.  A full read
 characterization, including cold-cache random-access latency, is deferred
 to a follow-on evaluation.
 
+\paragraph{L10 — Metadata orphaning on unlink.}
+\textit{Impact}: \texttt{unlink} removes only the \texttt{dirent} edge
+and any tag mappings; the \texttt{ino\_meta:} and \texttt{ino\_recipe:}
+records remain in sled.  Because GC treats all \texttt{ino\_recipe:}
+entries as live, CAS blobs referenced only by deleted files remain
+unreclaimed, and metadata grows without bound.  \textit{Root cause}:
+the FUSE unlink path does not cascade-delete inode metadata or recipes.
+\textit{Remedy}: On unlink, remove the inode's \texttt{ino\_meta:} and
+\texttt{ino\_recipe:} keys (and optionally run a deferred CAS GC), or
+add a background metadata sweeper that prunes unreachable inode records.
+
+\paragraph{L11 — Real/virtual inode range not enforced.}
+\textit{Impact}: Virtual TagFS inodes are allocated starting at
+\texttt{VIRTUAL\_INODE\_START} = 1,000,000, but the real inode counter
+is not prevented from crossing that boundary.  At sufficiently large
+inode counts, ID collisions can occur between live and virtual inodes.
+\textit{Root cause}: the prototype treats the separation as a convention
+only.  \textit{Remedy}: enforce a hard upper bound for real inodes (or
+move virtual inodes into a disjoint high-bit range).
+
 %% ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
 
@@ -1582,12 +1607,13 @@ storage costs within 1.3$\times$ of kernel-native Btrfs. All CRC32c
 integrity verifications pass at zero error rate, confirming lossless
 reconstruction through the full chunking and decompression pipeline.
 
-Nine quantified limitations (L1--L9) provide a concrete development
+Eleven quantified limitations (L1--L11) provide a concrete development
 roadmap: epoch-based online GC (L1), O(1) LRU via doubly-linked list
 (L2), cascade-delete on snapshot removal (L3), optional on-read
 verification (L4), per-chunk encryption (L5), merge-scan GC to bound
 memory (L6), multi-threaded FUSE dispatch (L7), distributed metadata
-and CAS backends (L8), and a full read-path benchmark suite (L9).
+and CAS backends (L8), a full read-path benchmark suite (L9), unlink
+metadata reclamation (L10), and enforced inode-range separation (L11).
 Addressing L7 and L8 would position ArcFS as a practical cloud storage
 primitive---a transparent deduplication and semantic-navigation gateway
 over distributed object stores---deployable without modification to
