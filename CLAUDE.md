@@ -106,7 +106,8 @@ File write → Chunker (Gear hash CDC) → Storage (SHA256 CAS + zstd compressio
   - Maintains two inode namespaces:
     - **Real inodes** (id < 1,000,000): backed by `FileManager`/sled, reconstructed from DB at boot
     - **Virtual inodes** (id ≥ `VIRTUAL_INODE_START` = 1,000,000): ephemeral TagFS navigation, never persisted
-  - Key reserved IDs: `1`=root, `2`=`.snapshots/`, `3`=snapshot-create sentinel, `4`=`.tags/`, `5`=`.tags/.tagfs_control`
+  - Key reserved IDs: `1`=root, `2`=`.snapshots/`, `3`=snapshot-create sentinel, `4`=`@tags/`, `5`=`.tagfs_ctl` (at fs root)
+  - `PAGE_CACHE_CAPACITY = 1024` — eviction kicks in when cache exceeds this many inodes; `touch_cache_entry()` is O(n) over the LRU `VecDeque`
 
 - **`main.rs`** — CLI (`clap`) wiring. The global `--storage-dir` flag (default `./my_storage`) is shared by all subcommands.
 
@@ -140,14 +141,26 @@ Tags are lowercased and deduplicated before storage.
 
 ### TagFS Control Interface
 
-When ArcFS is mounted, `.tags/.tagfs_control` is a writable sentinel file for tag management without unmounting:
+When ArcFS is mounted, `.tagfs_ctl` (at the fs root, inode 5) is a writable sentinel file for tag management without unmounting:
 
 ```bash
 # Set tags on a live path
-echo "set docs/report.txt work 2026" > mnt/.tags/.tagfs_control
+echo "set docs/report.txt work 2026" > mnt/.tagfs_ctl
 
 # Delete all tags for a path
-echo "del docs/report.txt" > mnt/.tags/.tagfs_control
+echo "del docs/report.txt" > mnt/.tagfs_ctl
 ```
 
-Command format: `<verb> <relative-path> [tags...]`. The `.tags/` directory virtualizes tag-based navigation — `mnt/.tags/work/2026/` lists all inodes tagged with both `work` and `2026`.
+Command format: `<verb> <relative-path> [tags...]`. The `@tags/` directory virtualizes tag-based navigation — `mnt/@tags/work/2026/` lists all inodes tagged with both `work` and `2026`.
+
+### FUSE Threading Model
+
+`fuser::mount2` dispatches all FUSE operations on a **single thread**. There is no thread pool. All benchmark IOPS figures reflect single-writer operation. Concurrent `fio` jobs serialize at the FUSE layer.
+
+### Known Bug: Snapshot Deletion Orphans Chunks
+
+`FileManager::delete_snapshot()` only removes the `snapshot:<name>` sled key. All `ino_recipe:` and `ino_meta:` entries cloned into the snapshot at creation time are left in the DB. GC's recipe-scan phase will find these recipes and mark their chunks reachable — so deleted-snapshot chunks are **never reclaimed by GC**.
+
+### Development Artifacts
+
+`src/chat.md` and `src/fuse_handler.rs.backup` are development scratch files — not source code. Do not parse or depend on them.
